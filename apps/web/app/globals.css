@@ -309,6 +309,10 @@ h1 {
   margin-top: 16px;
 }
 
+.workspace-grid-full {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .workspace-main,
 .workspace-side {
   display: grid;

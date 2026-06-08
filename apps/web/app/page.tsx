@@ -483,7 +483,7 @@ export default function Home() {
           ))}
         </section>
 
-        <section className="workspace-grid">
+        <section className={`workspace-grid ${activeModule === "dashboard" ? "" : "workspace-grid-full"}`}>
           <div className="workspace-main">
             {activeModule === "dashboard" ? (
               <DashboardModule
@@ -510,16 +510,18 @@ export default function Home() {
             ) : null}
           </div>
 
-          <aside className="workspace-side">
-            <NodePanel health={health} result={result} />
-            <CommandPanel
-              form={form}
-              clinics={state?.clinics ?? []}
-              busy={busy}
-              onChange={setForm}
-              onSubmit={submitTask}
-            />
-          </aside>
+          {activeModule === "dashboard" ? (
+            <aside className="workspace-side">
+              <NodePanel health={health} result={result} />
+              <CommandPanel
+                form={form}
+                clinics={state?.clinics ?? []}
+                busy={busy}
+                onChange={setForm}
+                onSubmit={submitTask}
+              />
+            </aside>
+          ) : null}
         </section>
       </main>
     </div>
