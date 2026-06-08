@@ -1,0 +1,49 @@
+# Lux Aeterna Clinical AI
+
+Sistema hibrido para operar una Web App central en Vercel y un nodo local por clinica en Docker con integracion preparada para OpenClaw.
+
+## Arquitectura
+
+- `apps/web`: dashboard central, API de tareas, reportes, sincronizacion y panel operativo para Vercel.
+- `services/local-node`: servicio Docker por cliente/clinica. Ejecuta automatizaciones locales, mantiene cola/eventos y llama OpenClaw cuando el Gateway/runner estan activos.
+- `ops/openclaw-runner`: puente HTTP local que ejecuta la CLI oficial de OpenClaw dentro del contenedor y devuelve una respuesta compacta a `local-node`.
+- `docker-compose.yml`: levanta el nodo local para probar el flujo antes de publicar en GitHub o Vercel.
+
+## Probar localmente
+
+```bash
+npm install
+npm run dev
+```
+
+La Web App queda normalmente en `http://localhost:3000` o `http://localhost:3001` si el puerto 3000 esta ocupado. El nodo local queda en `http://localhost:8787`.
+
+Si tienes Docker instalado:
+
+```bash
+docker compose up --build local-node
+npm run dev:web
+```
+
+## Variables
+
+Copia `.env.example` a `.env.local` para la Web App o a `.env` para Compose segun el entorno.
+
+La variable `OPENCLAW_MODE=gateway` conecta el nodo local con un Gateway real de OpenClaw. En esta maquina el Gateway se levanta desde Ubuntu WSL2 con Docker y queda en `http://127.0.0.1:18789`.
+
+Para llamadas reales al modelo, `OPENCLAW_RUNNER_URL=http://host.docker.internal:18889/run` apunta al runner local de OpenClaw. Ese runner usa un archivo de entorno seguro en WSL (`/root/.openclaw-secrets/openai.env`) y no guarda la API key dentro del repositorio.
+
+Usa `OPENCLAW_MODE=mock` solo como fallback sin dependencia externa.
+
+## Flujo hibrido
+
+1. La Web App central crea una tarea de automatizacion.
+2. La API central registra la tarea y, en local, la reenvia al nodo de clinica usando `LOCAL_NODE_URL` y `LOCAL_NODE_TOKEN`.
+3. El nodo local ejecuta la automatizacion; si `OPENCLAW_RUNNER_URL` esta configurado, manda una orden real a OpenClaw y conserva trazabilidad compacta del modelo.
+4. La Web App consume eventos de sincronizacion para reportes, contabilidad y auditoria.
+
+## Produccion
+
+Para produccion en Vercel se recomienda que el nodo local haga `pull` de tareas desde la API central o use un tunel seguro/mTLS. No conviene depender de que el navegador de Vercel llame directamente a una red privada de la clinica.
+
+Guia de deploy: [docs/vercel-deploy.md](docs/vercel-deploy.md).

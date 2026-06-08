@@ -1,0 +1,29 @@
+services:
+  openclaw-runner:
+    image: ghcr.io/openclaw/openclaw:latest
+    container_name: lux-aeterna-openclaw-runner
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+    command: ["node", "/runner/server.mjs"]
+    environment:
+      OPENCLAW_RUNNER_PORT: 18889
+      LOCAL_NODE_TOKEN: ${LOCAL_NODE_TOKEN:-dev-local-node-token}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "18889:18889"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:18889/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    volumes:
+      - lux_aeterna_openclaw_home:/root/.openclaw
+      - /mnt/c/Users/Ronny/Documents/Cilinic AI/ops/openclaw-runner:/runner:ro
+    restart: unless-stopped

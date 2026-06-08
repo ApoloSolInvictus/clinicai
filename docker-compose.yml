@@ -1,0 +1,25 @@
+services:
+  local-node:
+    build:
+      context: ./services/local-node
+    container_name: lux-aeterna-local-node
+    environment:
+      PORT: 8787
+      CLINIC_ID: ${CLINIC_ID:-clinic-san-jose}
+      CLINIC_NAME: ${CLINIC_NAME:-Clinica San Jose}
+      CENTRAL_API_URL: ${CENTRAL_API_URL:-http://host.docker.internal:3000/api}
+      LOCAL_NODE_TOKEN: ${LOCAL_NODE_TOKEN:-dev-local-node-token}
+      OPENCLAW_MODE: ${OPENCLAW_MODE:-gateway}
+      OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:18789}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      OPENCLAW_RUNNER_URL: ${OPENCLAW_RUNNER_URL:-http://host.docker.internal:18889/run}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8787:8787"
+    volumes:
+      - local-node-data:/app/local-data
+    restart: unless-stopped
+
+volumes:
+  local-node-data:

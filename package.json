@@ -1,0 +1,25 @@
+{
+  "name": "lux-aeterna-clinical-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hybrid clinical AI architecture: Vercel web app plus per-clinic OpenClaw Docker node.",
+  "packageManager": "npm@10.5.1",
+  "workspaces": [
+    "apps/web",
+    "services/local-node"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,node -c cyan,green \"npm:dev --workspace apps/web\" \"npm:dev --workspace services/local-node\"",
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:node": "npm run dev --workspace services/local-node",
+    "build": "npm run build --workspace apps/web",
+    "start:web": "npm run start --workspace apps/web",
+    "start:node": "npm run start --workspace services/local-node"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

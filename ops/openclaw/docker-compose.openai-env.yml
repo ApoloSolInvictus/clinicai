@@ -1,0 +1,10 @@
+services:
+  openclaw-gateway:
+    env_file:
+      - /root/.openclaw-secrets/openai.env
+  openclaw-cli:
+    env_file:
+      - /root/.openclaw-secrets/openai.env
+  openclaw-runner:
+    env_file:
+      - /root/.openclaw-secrets/openai.env
