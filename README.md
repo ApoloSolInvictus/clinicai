@@ -42,6 +42,10 @@ Usa `OPENCLAW_MODE=mock` solo como fallback sin dependencia externa.
 3. El nodo local ejecuta la automatizacion; si `OPENCLAW_RUNNER_URL` esta configurado, manda una orden real a OpenClaw y conserva trazabilidad compacta del modelo.
 4. La Web App consume eventos de sincronizacion para reportes, contabilidad y auditoria.
 
+## Modulos operativos
+
+La primera version con login incluye menu para `Dashboard`, `Agenda`, `Pacientes`, `Medicos`, `Caja`, `Reportes`, `Automatizaciones` y `Configuracion`. Cada modulo lee datos filtrados por clinica y las plantillas de automatizacion envian tareas al Docker/OpenClaw local autorizado.
+
 ## Produccion
 
 Para produccion en Vercel se recomienda que el nodo local haga `pull` de tareas desde la API central o use un tunel seguro/mTLS. No conviene depender de que el navegador de Vercel llame directamente a una red privada de la clinica.
