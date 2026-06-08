@@ -1,3 +1,5 @@
+import { getPublicClinics } from "./clinic-config";
+
 export type TaskIntent =
   | "agenda"
   | "correos"
@@ -41,30 +43,15 @@ export type CentralState = {
 };
 
 const now = new Date().toISOString();
+const configuredClinics = getPublicClinics();
+const defaultClinicId = configuredClinics[0]?.id ?? "clinic-san-jose";
 
 const initialState: CentralState = {
-  clinics: [
-    {
-      id: "clinic-san-jose",
-      name: "Clinica San Jose",
-      region: "Costa Rica",
-      nodeUrl: process.env.NEXT_PUBLIC_LOCAL_NODE_URL ?? "http://localhost:8787",
-      status: "degraded",
-      lastSync: now
-    },
-    {
-      id: "clinic-escazu",
-      name: "Clinica Escazu",
-      region: "Costa Rica",
-      nodeUrl: "pending-docker-node",
-      status: "offline",
-      lastSync: now
-    }
-  ],
+  clinics: configuredClinics,
   tasks: [
     {
       id: "task-seed-1",
-      clinicId: "clinic-san-jose",
+      clinicId: defaultClinicId,
       intent: "agenda",
       priority: "normal",
       prompt: "Revisar conflictos de agenda para manana y preparar confirmaciones.",
@@ -75,7 +62,7 @@ const initialState: CentralState = {
   events: [
     {
       id: "evt-seed-1",
-      clinicId: "clinic-san-jose",
+      clinicId: defaultClinicId,
       type: "architecture.ready",
       message: "Modelo hibrido inicializado: Vercel central + Docker local.",
       at: now
@@ -94,6 +81,18 @@ export function getState() {
   }
 
   return globalThis.luxAeternaState;
+}
+
+export function getStateForAccess(access: { allClinics: boolean; clinicIds: string[] }) {
+  const state = getState();
+  if (access.allClinics) return state;
+  const allowed = new Set(access.clinicIds);
+
+  return {
+    clinics: state.clinics.filter((clinic) => allowed.has(clinic.id)),
+    tasks: state.tasks.filter((task) => allowed.has(task.clinicId)),
+    events: state.events.filter((event) => allowed.has(event.clinicId))
+  };
 }
 
 export function createTask(input: Omit<AutomationTask, "id" | "status" | "createdAt">) {

@@ -10,15 +10,21 @@ import {
   Database,
   FileClock,
   HeartPulse,
+  KeyRound,
+  LogIn,
+  LogOut,
   Mail,
   Play,
   RefreshCw,
   ShieldCheck,
   Stethoscope,
+  UserRound,
   WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 import type { CentralState, TaskIntent } from "@/lib/data";
+import { useFirebaseSession } from "@/lib/use-firebase-session";
 
 type HealthState = {
   ok?: boolean;
@@ -112,10 +118,14 @@ const intentLabels: Record<TaskIntent, string> = {
 };
 
 export default function Home() {
+  const session = useFirebaseSession();
   const [state, setState] = useState<CentralState | null>(null);
   const [health, setHealth] = useState<HealthState | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("Listo para enviar una orden al nodo local.");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
   const [form, setForm] = useState({
     clinicId: "clinic-san-jose",
     intent: "agenda" as TaskIntent,
@@ -124,13 +134,25 @@ export default function Home() {
   });
 
   async function loadState() {
-    const response = await fetch("/api/state", { cache: "no-store" });
-    setState(await response.json());
+    const response = await fetch("/api/state", {
+      headers: await session.getAuthHeaders(),
+      cache: "no-store"
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error ?? "No se pudo cargar el estado central.");
+    setState(payload);
+    setForm((current) => {
+      const hasClinic = payload.clinics?.some((clinic: { id: string }) => clinic.id === current.clinicId);
+      return hasClinic || !payload.clinics?.[0]?.id ? current : { ...current, clinicId: payload.clinics[0].id };
+    });
   }
 
   async function pingLocalNode() {
     try {
-      const response = await fetch("/api/local-health", { cache: "no-store" });
+      const response = await fetch(`/api/local-health?clinicId=${encodeURIComponent(form.clinicId)}`, {
+        headers: await session.getAuthHeaders(),
+        cache: "no-store"
+      });
       const payload = await response.json();
       setHealth(payload);
       setResult(JSON.stringify(payload, null, 2));
@@ -145,7 +167,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
         body: JSON.stringify(form)
       });
       const payload = await response.json();
@@ -161,7 +183,11 @@ export default function Home() {
   async function syncNow() {
     setBusy(true);
     try {
-      const response = await fetch("/api/sync", { method: "POST" });
+      const response = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({ clinicId: form.clinicId })
+      });
       const payload = await response.json();
       setResult(JSON.stringify(payload, null, 2));
       await loadState();
@@ -173,9 +199,34 @@ export default function Home() {
   }
 
   useEffect(() => {
-    loadState();
-    pingLocalNode();
-  }, []);
+    if (!session.loading && session.user) {
+      loadState()
+        .then(() => pingLocalNode())
+        .catch((error) => {
+          setResult(error instanceof Error ? error.message : "No se pudo iniciar la sesion operativa.");
+        });
+    }
+  }, [session.loading, session.user?.uid]);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginError("");
+    try {
+      await session.login(loginEmail, loginPassword);
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "No se pudo iniciar sesion.");
+    }
+  }
+
+  async function handlePasswordReset() {
+    setLoginError("");
+    try {
+      await session.resetPassword(loginEmail);
+      setLoginError("Se envio el correo de recuperacion.");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "No se pudo enviar recuperacion.");
+    }
+  }
 
   const metrics = useMemo(() => {
     const tasks = state?.tasks ?? [];
@@ -209,6 +260,85 @@ export default function Home() {
   }, [health?.ok, state]);
 
   const events = state?.events.slice(0, 6) ?? [];
+
+  if (session.loading) {
+    return (
+      <AuthShell>
+        <div className="auth-card">
+          <div className="auth-mark">
+            <Stethoscope size={28} />
+          </div>
+          <h1>Lux Aeterna Clinical AI</h1>
+          <p className="muted-text">Validando sesion operativa.</p>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  if (!session.configured) {
+    return (
+      <AuthShell>
+        <div className="auth-card">
+          <div className="auth-mark">
+            <KeyRound size={28} />
+          </div>
+          <h1>Firebase pendiente</h1>
+          <p className="muted-text">
+            Configura las variables `NEXT_PUBLIC_FIREBASE_*` y `FIREBASE_*` para activar el acceso por clinica.
+          </p>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  if (!session.user) {
+    return (
+      <AuthShell>
+        <form className="auth-card auth-form" onSubmit={handleLogin}>
+          <div className="auth-mark">
+            <LogIn size={28} />
+          </div>
+          <div>
+            <h1>Lux Aeterna Clinical AI</h1>
+            <p className="muted-text">Acceso clinico autorizado.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="email">Correo</label>
+            <input
+              id="email"
+              type="email"
+              value={loginEmail}
+              onChange={(event) => setLoginEmail(event.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="password">Clave</label>
+            <input
+              id="password"
+              type="password"
+              value={loginPassword}
+              onChange={(event) => setLoginPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {loginError ? <div className="auth-error">{loginError}</div> : null}
+          <div className="button-row">
+            <button className="btn primary" type="submit" title="Entrar al sistema">
+              <LogIn size={18} />
+              Entrar
+            </button>
+            <button className="btn" type="button" onClick={handlePasswordReset} title="Enviar recuperacion">
+              <KeyRound size={18} />
+              Recuperar
+            </button>
+          </div>
+        </form>
+      </AuthShell>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -255,6 +385,14 @@ export default function Home() {
             <button className="btn" onClick={syncNow} disabled={busy} title="Sincronizar eventos locales">
               <RefreshCw size={18} />
               Sync
+            </button>
+            <span className="status-pill profile-pill">
+              <UserRound size={16} />
+              {session.profile?.email ?? "Usuario"}
+            </span>
+            <button className="btn" onClick={session.logout} title="Cerrar sesion">
+              <LogOut size={18} />
+              Salir
             </button>
           </div>
         </header>
@@ -465,4 +603,8 @@ export default function Home() {
       </main>
     </div>
   );
+}
+
+function AuthShell({ children }: { children: ReactNode }) {
+  return <main className="auth-shell">{children}</main>;
 }

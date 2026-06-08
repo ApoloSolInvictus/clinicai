@@ -1,20 +1,29 @@
 import { NextResponse } from "next/server";
+import { getClinicNodeConfig } from "@/lib/clinic-config";
 import { addEvent, getState, patchClinic } from "@/lib/data";
+import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
-export async function POST() {
-  const localNodeUrl = process.env.LOCAL_NODE_URL;
-  const token = process.env.LOCAL_NODE_TOKEN;
+export async function POST(request: Request) {
+  const auth = await requireAuthenticatedUser(request);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  if (!localNodeUrl) {
-    return NextResponse.json({ error: "LOCAL_NODE_URL no configurado" }, { status: 400 });
+  const body = await request.json().catch(() => null);
+  const clinicId = typeof body?.clinicId === "string" ? body.clinicId : firstAccessibleClinicId(auth.user);
+  if (!canAccessClinic(auth.user, clinicId)) {
+    return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
+  }
+
+  const node = getClinicNodeConfig(clinicId);
+  if (!node?.nodeUrl) {
+    return NextResponse.json({ error: "La clinica no tiene nodo local configurado." }, { status: 400 });
   }
 
   try {
-    const response = await fetch(`${localNodeUrl.replace(/\/$/, "")}/sync/now`, {
+    const response = await fetch(`${node.nodeUrl.replace(/\/$/, "")}/sync/now`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {})
+        ...(node.token ? { authorization: `Bearer ${node.token}` } : {})
       },
       cache: "no-store"
     });

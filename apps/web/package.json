@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "firebase:claims": "node scripts/set-user-claims.mjs",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "firebase": "^12.14.0",
+    "firebase-admin": "^13.10.0",
     "lucide-react": "^0.468.0",
     "next": "^15.1.0",
     "react": "^19.0.0",

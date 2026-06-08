@@ -12,5 +12,6 @@ yarn-error.log*
 pnpm-debug.log*
 *.dev.log
 *.dev.err.log
+cloudflared*.log
 *.tsbuildinfo
 local-data/

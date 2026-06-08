@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getClinicNodeConfig } from "@/lib/clinic-config";
 import { addEvent, createTask, patchClinic, patchTask } from "@/lib/data";
+import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const taskSchema = z.object({
   clinicId: z.string().min(1),
@@ -12,6 +14,9 @@ const taskSchema = z.object({
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  const auth = await requireAuthenticatedUser(request);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const parsed = taskSchema.safeParse(await request.json());
 
   if (!parsed.success) {
@@ -21,24 +26,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const task = createTask(parsed.data);
-  const localNodeUrl = process.env.LOCAL_NODE_URL;
-  const token = process.env.LOCAL_NODE_TOKEN;
+  if (!canAccessClinic(auth.user, parsed.data.clinicId)) {
+    return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
+  }
 
-  if (!localNodeUrl) {
+  const task = createTask(parsed.data);
+  const node = getClinicNodeConfig(task.clinicId);
+
+  if (!node?.nodeUrl) {
     return NextResponse.json({
       task,
       forwarded: false,
-      note: "LOCAL_NODE_URL no esta configurado; la tarea queda en cola central."
+      note: "La clinica no tiene nodo local configurado; la tarea queda en cola central."
     });
   }
 
   try {
-    const response = await fetch(`${localNodeUrl.replace(/\/$/, "")}/tasks`, {
+    const response = await fetch(`${node.nodeUrl.replace(/\/$/, "")}/tasks`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {})
+        ...(node.token ? { authorization: `Bearer ${node.token}` } : {})
       },
       body: JSON.stringify(task),
       cache: "no-store",

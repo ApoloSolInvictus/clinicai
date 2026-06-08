@@ -47,3 +47,4 @@ Usa `OPENCLAW_MODE=mock` solo como fallback sin dependencia externa.
 Para produccion en Vercel se recomienda que el nodo local haga `pull` de tareas desde la API central o use un tunel seguro/mTLS. No conviene depender de que el navegador de Vercel llame directamente a una red privada de la clinica.
 
 Guia de deploy: [docs/vercel-deploy.md](docs/vercel-deploy.md).
+Guia de Firebase Auth: [docs/firebase-auth.md](docs/firebase-auth.md).

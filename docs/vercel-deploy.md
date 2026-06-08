@@ -16,8 +16,13 @@ Configura estas variables en `Production` y `Preview`:
 
 - `LOCAL_NODE_URL`: URL publica y segura del nodo local de la clinica. No uses `localhost` en Vercel.
 - `LOCAL_NODE_TOKEN`: token compartido para enviar tareas al nodo local.
+- `CLINIC_NODE_CONFIG_JSON`: configuracion multi-clinica con URL y token por Docker local.
+- `NEXT_PUBLIC_FIREBASE_*`: configuracion web de Firebase Auth.
+- `FIREBASE_*`: credenciales de Firebase Admin para verificar tokens.
 
 Para una demo rapida, `LOCAL_NODE_URL` puede apuntar a un tunel HTTPS temporal hacia `http://localhost:8787`. Para produccion, usa VPN, mTLS, Cloudflare Tunnel, Tailscale Funnel, reverse proxy seguro o un modelo de pull donde el nodo local consulte tareas salientes.
+
+Guia de Firebase: [firebase-auth.md](firebase-auth.md).
 
 ## Comandos CLI
 
