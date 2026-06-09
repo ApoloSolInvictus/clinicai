@@ -23,6 +23,7 @@ import {
   LogOut,
   Mail,
   MessageCircle,
+  Mic,
   Phone,
   Play,
   Plus,
@@ -32,14 +33,16 @@ import {
   Settings,
   ShieldCheck,
   Stethoscope,
+  Square,
   Trash2,
   UserCog,
   UserRound,
   Users,
+  Wand2,
   WalletCards
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type {
   AppointmentRecord,
@@ -109,6 +112,45 @@ type ExecutionState = {
 
 type PatientChannel = "email" | "whatsapp";
 
+type SpeechRecognitionAlternativeLike = {
+  transcript: string;
+};
+
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  0?: SpeechRecognitionAlternativeLike;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+};
+
+type SpeechRecognitionLike = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
 const reportTypeLabels: Record<PatientReport["type"], string> = {
   "reporte-medico": "Reporte medico",
   recetario: "Recetario",
@@ -138,6 +180,147 @@ const instructionStatusLabels: Record<PatientInstruction["status"], string> = {
   aprobado: "Aprobado",
   enviado: "Enviado"
 };
+
+const medicalDictationTerms = [
+  "anamnesis",
+  "antecedentes heredofamiliares",
+  "hipertension arterial",
+  "diabetes mellitus tipo 2",
+  "dislipidemia",
+  "cardiopatia isquemica",
+  "insuficiencia cardiaca",
+  "enfermedad pulmonar obstructiva cronica",
+  "asma bronquial",
+  "neumonia",
+  "bronquitis",
+  "rinitis alergica",
+  "sinusitis",
+  "cefalea",
+  "migrana",
+  "mareo",
+  "vertigo",
+  "dolor toracico",
+  "dolor abdominal",
+  "epigastralgia",
+  "nauseas",
+  "vomitos",
+  "diarrea",
+  "estrenimiento",
+  "disnea",
+  "ortopnea",
+  "taquicardia",
+  "bradicardia",
+  "palpitaciones",
+  "edema periferico",
+  "fiebre",
+  "febricula",
+  "mialgias",
+  "artralgias",
+  "lumbalgia",
+  "cervicalgia",
+  "radiculopatia",
+  "parestesias",
+  "neuropatia periferica",
+  "convulsiones",
+  "ansiedad",
+  "depresion",
+  "insomnio",
+  "hiperglucemia",
+  "hipoglucemia",
+  "hemoglobina glicosilada",
+  "perfil lipidico",
+  "creatinina",
+  "filtrado glomerular",
+  "transaminasas",
+  "hemograma completo",
+  "leucocitosis",
+  "anemia",
+  "plaquetopenia",
+  "electrocardiograma",
+  "radiografia de torax",
+  "ultrasonido abdominal",
+  "tomografia computarizada",
+  "resonancia magnetica",
+  "metformina",
+  "glibenclamida",
+  "insulina glargina",
+  "losartan",
+  "enalapril",
+  "amlodipino",
+  "hidroclorotiazida",
+  "furosemida",
+  "atorvastatina",
+  "rosuvastatina",
+  "aspirina",
+  "clopidogrel",
+  "warfarina",
+  "rivaroxaban",
+  "omeprazol",
+  "pantoprazol",
+  "salbutamol",
+  "budesonida",
+  "prednisona",
+  "dexametasona",
+  "amoxicilina",
+  "azitromicina",
+  "ceftriaxona",
+  "ciprofloxacina",
+  "ibuprofeno",
+  "acetaminofen",
+  "diclofenaco",
+  "tramadol",
+  "gabapentina",
+  "pregabalina",
+  "sertralina",
+  "escitalopram",
+  "clonazepam",
+  "levotiroxina"
+];
+
+const medicalDictationReplacements: { pattern: RegExp; value: string }[] = [
+  { pattern: /\bpunto y aparte\b/gi, value: ".\n\n" },
+  { pattern: /\bnueva linea\b/gi, value: "\n" },
+  { pattern: /\bdos puntos\b/gi, value: ":" },
+  { pattern: /\bpunto seguido\b/gi, value: ". " },
+  { pattern: /\bpunto\b/gi, value: "." },
+  { pattern: /\bcoma\b/gi, value: "," },
+  { pattern: /\bhta\b/gi, value: "HTA" },
+  { pattern: /\bdm dos\b/gi, value: "diabetes mellitus tipo 2" },
+  { pattern: /\bdm2\b/gi, value: "diabetes mellitus tipo 2" },
+  { pattern: /\bepoc\b/gi, value: "EPOC" },
+  { pattern: /\bpa\b/gi, value: "presion arterial" },
+  { pattern: /\bfc\b/gi, value: "frecuencia cardiaca" },
+  { pattern: /\bfr\b/gi, value: "frecuencia respiratoria" },
+  { pattern: /\bsato dos\b/gi, value: "saturacion de oxigeno" },
+  { pattern: /\bsat o dos\b/gi, value: "saturacion de oxigeno" },
+  { pattern: /\bhba1c\b/gi, value: "hemoglobina glicosilada" },
+  { pattern: /\becg\b/gi, value: "electrocardiograma" },
+  { pattern: /\brx torax\b/gi, value: "radiografia de torax" },
+  { pattern: /\btac\b/gi, value: "tomografia computarizada" },
+  { pattern: /\brmn\b/gi, value: "resonancia magnetica" },
+  { pattern: /\bvia oral\b/gi, value: "via oral" },
+  { pattern: /\bcada ocho horas\b/gi, value: "cada 8 horas" },
+  { pattern: /\bcada doce horas\b/gi, value: "cada 12 horas" },
+  { pattern: /\bcada veinticuatro horas\b/gi, value: "cada 24 horas" },
+  { pattern: /\bmiligramos\b/gi, value: "mg" },
+  { pattern: /\bmililitros\b/gi, value: "mL" },
+  { pattern: /\bgramos\b/gi, value: "g" },
+  { pattern: /\bunidades internacionales\b/gi, value: "UI" }
+];
+
+function normalizeMedicalDictation(value: string) {
+  let normalized = value.replace(/\s+/g, " ").trim();
+  medicalDictationReplacements.forEach((item) => {
+    normalized = normalized.replace(item.pattern, item.value);
+  });
+  normalized = normalized
+    .replace(/\s+([,.:;])/g, "$1")
+    .replace(/([.:])([^\s\n])/g, "$1 $2")
+    .replace(/\n\s+/g, "\n")
+    .trim();
+
+  return normalized;
+}
 
 const appointmentStatusLabels: Record<AppointmentRecord["status"], string> = {
   solicitada: "Solicitada",
@@ -870,6 +1053,84 @@ export default function Home() {
     });
   }
 
+  async function saveMedicalDictation(input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    title: string;
+    summary: string;
+    prescription: string;
+    nextAppointment: string;
+    medicalImages: string[];
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/doctor-reports", {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({
+          clinicId,
+          patientId: input.patient.id,
+          reportId: input.report.id,
+          doctorId: input.doctor.id,
+          title: input.title,
+          summary: normalizeMedicalDictation(input.summary),
+          prescription: normalizeMedicalDictation(input.prescription),
+          nextAppointment: input.nextAppointment,
+          medicalImages: input.medicalImages,
+          deliveryChannels: input.deliveryChannels
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo guardar el dictado medico.");
+      }
+
+      setState(payload.state);
+      setExecution({
+        status: "completed",
+        title: "Dictado medico guardado",
+        message: `Reporte de ${input.patient.name} actualizado y pendiente de aprobacion humana.`,
+        intent: "historial",
+        forwarded: false,
+        source: "Dictado medico OpenClinic",
+        taskId: input.report.id,
+        updatedAt: new Date().toISOString()
+      });
+      setResult(JSON.stringify({ report: payload.report, dictated: true }, null, 2));
+      return payload.report as PatientReport;
+    } catch (error) {
+      setExecution(summarizeError(error, "historial"));
+      setResult(error instanceof Error ? error.message : "No se pudo guardar el dictado medico.");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewMedicalDictation(input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    summary: string;
+    prescription: string;
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) {
+    await sendTask({
+      clinicId: input.patient.clinicId,
+      intent: "historial",
+      priority: "alta",
+      prompt:
+        `Revisa este reporte medico dictado por voz para ${input.patient.name} (${input.patient.documentId}). ` +
+        `Medico: ${input.doctor.name}. Reporte: ${input.report.title}. ` +
+        `Resumen dictado: ${normalizeMedicalDictation(input.summary)}. ` +
+        `Recetario/indicaciones dictadas: ${normalizeMedicalDictation(input.prescription) || "sin recetario"}. ` +
+        `Canales autorizados: ${input.deliveryChannels.join(", ")}. ` +
+        "Corrige estructura, detecta datos faltantes, conserva criterio medico sin inventar datos y deja todo pendiente de aprobacion/firma humana."
+    });
+  }
+
   async function prepareAppointmentReminders(appointment: AppointmentRecord) {
     const patient = clinicPatients.find((item) => item.id === appointment.patientId);
     const service = clinicServices.find((item) => item.id === appointment.serviceId);
@@ -1288,6 +1549,8 @@ export default function Home() {
                 busy={busy}
                 onSaveDoctorProfile={saveDoctorProfile}
                 onApproveReport={approveReportAndPrepareDelivery}
+                onSaveMedicalDictation={saveMedicalDictation}
+                onReviewMedicalDictation={reviewMedicalDictation}
               />
             ) : null}
             {activeModule === "caja" ? (
@@ -2651,7 +2914,9 @@ function DoctorsModule({
   clinicId,
   busy,
   onSaveDoctorProfile,
-  onApproveReport
+  onApproveReport,
+  onSaveMedicalDictation,
+  onReviewMedicalDictation
 }: {
   staff: StaffMember[];
   schedules: DoctorSchedule[];
@@ -2665,6 +2930,25 @@ function DoctorsModule({
     patient: PatientRecord;
     report: PatientReport;
     doctor: StaffMember;
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) => void;
+  onSaveMedicalDictation: (input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    title: string;
+    summary: string;
+    prescription: string;
+    nextAppointment: string;
+    medicalImages: string[];
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) => Promise<PatientReport | undefined>;
+  onReviewMedicalDictation: (input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    summary: string;
+    prescription: string;
     deliveryChannels: ("email" | "whatsapp")[];
   }) => void;
 }) {
@@ -3094,6 +3378,15 @@ function DoctorsModule({
                     WhatsApp
                   </label>
                 </div>
+                <MedicalDictationPanel
+                  patient={selectedReportContext.patient}
+                  report={selectedReportContext.report}
+                  doctor={draft}
+                  deliveryChannels={approvalChannels}
+                  busy={busy}
+                  onSave={onSaveMedicalDictation}
+                  onReview={onReviewMedicalDictation}
+                />
                 <button
                   className="btn primary"
                   type="button"
@@ -3135,6 +3428,312 @@ function DoctorsModule({
           ))}
         </div>
       </Panel>
+    </div>
+  );
+}
+
+function MedicalDictationPanel({
+  patient,
+  report,
+  doctor,
+  deliveryChannels,
+  busy,
+  onSave,
+  onReview
+}: {
+  patient: PatientRecord;
+  report: PatientReport;
+  doctor: StaffMember;
+  deliveryChannels: ("email" | "whatsapp")[];
+  busy: boolean;
+  onSave: (input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    title: string;
+    summary: string;
+    prescription: string;
+    nextAppointment: string;
+    medicalImages: string[];
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) => Promise<PatientReport | undefined>;
+  onReview: (input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    summary: string;
+    prescription: string;
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) => void;
+}) {
+  const [speechSupport, setSpeechSupport] = useState<"checking" | "supported" | "unsupported">("checking");
+  const [listening, setListening] = useState(false);
+  const [dictationTarget, setDictationTarget] = useState<"summary" | "prescription">("summary");
+  const [interimText, setInterimText] = useState("");
+  const [dictationError, setDictationError] = useState("");
+  const [draft, setDraft] = useState({
+    title: report.title,
+    summary: report.summary,
+    prescription: report.prescription,
+    nextAppointment: report.nextAppointment,
+    medicalImagesText: report.medicalImages.join(", ")
+  });
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const dictationTargetRef = useRef(dictationTarget);
+
+  useEffect(() => {
+    setSpeechSupport(window.SpeechRecognition || window.webkitSpeechRecognition ? "supported" : "unsupported");
+  }, []);
+
+  useEffect(() => {
+    dictationTargetRef.current = dictationTarget;
+  }, [dictationTarget]);
+
+  useEffect(() => {
+    setDraft({
+      title: report.title,
+      summary: report.summary,
+      prescription: report.prescription,
+      nextAppointment: report.nextAppointment,
+      medicalImagesText: report.medicalImages.join(", ")
+    });
+    setInterimText("");
+    setDictationError("");
+    recognitionRef.current?.abort();
+  }, [report.id, report.medicalImages, report.nextAppointment, report.prescription, report.summary, report.title]);
+
+  function appendDictation(text: string) {
+    const normalized = normalizeMedicalDictation(text);
+    if (!normalized) return;
+
+    setDraft((current) => {
+      const target = dictationTargetRef.current;
+      const currentText = current[target].trim();
+      return {
+        ...current,
+        [target]: currentText ? `${currentText} ${normalized}` : normalized
+      };
+    });
+  }
+
+  function stopDictation() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+    setInterimText("");
+  }
+
+  function startDictation(target: "summary" | "prescription") {
+    setDictationError("");
+    setInterimText("");
+    setDictationTarget(target);
+    dictationTargetRef.current = target;
+
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setSpeechSupport("unsupported");
+      setDictationError("El navegador no tiene reconocimiento de voz disponible. Prueba con Chrome o Edge.");
+      return;
+    }
+
+    recognitionRef.current?.abort();
+    const recognition = new Recognition();
+    recognition.lang = "es-CR";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      let finalText = "";
+      let interim = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = result?.[0]?.transcript ?? "";
+        if (result?.isFinal) {
+          finalText += ` ${transcript}`;
+        } else {
+          interim += ` ${transcript}`;
+        }
+      }
+      appendDictation(finalText);
+      setInterimText(normalizeMedicalDictation(interim));
+    };
+    recognition.onerror = (event) => {
+      setDictationError(event.error ? `Error de microfono: ${event.error}` : "No se pudo escuchar el microfono.");
+      setListening(false);
+    };
+    recognition.onend = () => {
+      setListening(false);
+      setInterimText("");
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+      setListening(true);
+    } catch (error) {
+      setDictationError(error instanceof Error ? error.message : "No se pudo iniciar el dictado.");
+      setListening(false);
+    }
+  }
+
+  function normalizeDraft() {
+    setDraft((current) => ({
+      ...current,
+      summary: normalizeMedicalDictation(current.summary),
+      prescription: normalizeMedicalDictation(current.prescription)
+    }));
+  }
+
+  async function saveDictation() {
+    await onSave({
+      patient,
+      report,
+      doctor,
+      title: draft.title,
+      summary: draft.summary,
+      prescription: draft.prescription,
+      nextAppointment: draft.nextAppointment,
+      medicalImages: splitList(draft.medicalImagesText),
+      deliveryChannels
+    });
+  }
+
+  const canUseMicrophone = speechSupport === "supported";
+  const summaryReady = draft.summary.trim().length >= 8;
+
+  return (
+    <div className="dictation-panel">
+      <div className="section-title-row">
+        <div>
+          <h3>Dictado medico OpenClinic</h3>
+          <p className="muted-text">
+            {patient.name} - {patient.documentId || "documento pendiente"} - {doctor.name || "medico pendiente"}
+          </p>
+        </div>
+        <span className={`status-chip ${listening ? "ejecutando" : canUseMicrophone ? "online" : "pendiente"}`}>
+          {listening ? "escuchando" : canUseMicrophone ? "microfono listo" : "mic pendiente"}
+        </span>
+      </div>
+
+      <div className="patient-context-grid">
+        <div className="reader-block">
+          <strong>Datos personales</strong>
+          <p>
+            Nacimiento: {patient.birthDate || "pendiente"} - Sexo: {patient.sex} - Riesgo: {patient.risk}
+          </p>
+        </div>
+        <div className="reader-block">
+          <strong>Alertas clinicas</strong>
+          <p>
+            Alergias: {patient.allergies || "sin registro"} - Condiciones: {patient.chronicConditions || "sin registro"}
+          </p>
+        </div>
+      </div>
+
+      <div className="dictation-toolbar">
+        <button className="btn" type="button" onClick={() => startDictation("summary")} disabled={busy || !canUseMicrophone || listening}>
+          <Mic size={18} />
+          Dictar reporte
+        </button>
+        <button className="btn" type="button" onClick={() => startDictation("prescription")} disabled={busy || !canUseMicrophone || listening}>
+          <Mic size={18} />
+          Dictar receta
+        </button>
+        <button className="btn" type="button" onClick={stopDictation} disabled={!listening}>
+          <Square size={18} />
+          Detener
+        </button>
+        <button className="btn" type="button" onClick={normalizeDraft} disabled={busy}>
+          <Wand2 size={18} />
+          Normalizar
+        </button>
+      </div>
+
+      {interimText ? (
+        <div className="dictation-live">
+          <strong>Escuchando {dictationTarget === "summary" ? "reporte" : "receta"}</strong>
+          <p>{interimText}</p>
+        </div>
+      ) : null}
+      {dictationError ? <div className="auth-error">{dictationError}</div> : null}
+
+      <div className="field-grid">
+        <div className="field">
+          <label htmlFor="dictation-title">Titulo del reporte</label>
+          <input id="dictation-title" value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} />
+        </div>
+        <div className="field">
+          <label htmlFor="dictation-next">Proxima cita</label>
+          <input
+            id="dictation-next"
+            value={draft.nextAppointment}
+            onChange={(event) => setDraft((current) => ({ ...current, nextAppointment: event.target.value }))}
+          />
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="dictation-summary">Reporte medico dictado</label>
+        <textarea
+          id="dictation-summary"
+          className="dictation-textarea"
+          value={draft.summary}
+          onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="dictation-prescription">Recetario e indicaciones</label>
+        <textarea
+          id="dictation-prescription"
+          className="dictation-textarea"
+          value={draft.prescription}
+          onChange={(event) => setDraft((current) => ({ ...current, prescription: event.target.value }))}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="dictation-images">Imagenes, laboratorios o adjuntos</label>
+        <input
+          id="dictation-images"
+          value={draft.medicalImagesText}
+          onChange={(event) => setDraft((current) => ({ ...current, medicalImagesText: event.target.value }))}
+          placeholder="rx-torax.pdf, laboratorio.pdf"
+        />
+      </div>
+
+      <div className="dictation-vocabulary">
+        {medicalDictationTerms.slice(0, 28).map((term) => (
+          <span className="tag" key={term}>
+            {term}
+          </span>
+        ))}
+      </div>
+
+      <div className="button-row">
+        <button className="btn primary" type="button" onClick={saveDictation} disabled={busy || !doctor.id || !summaryReady}>
+          <Save size={18} />
+          Guardar dictado
+        </button>
+        <button
+          className="btn"
+          type="button"
+          onClick={() =>
+            onReview({
+              patient,
+              report,
+              doctor,
+              summary: draft.summary,
+              prescription: draft.prescription,
+              deliveryChannels
+            })
+          }
+          disabled={busy || !summaryReady}
+        >
+          <Bot size={18} />
+          Revisar con OpenClaw
+        </button>
+      </div>
     </div>
   );
 }

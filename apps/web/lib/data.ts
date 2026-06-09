@@ -1622,6 +1622,51 @@ export function approvePatientReport(input: {
   return { patient, report, doctor };
 }
 
+export function updatePatientReportDraft(input: {
+  clinicId: string;
+  patientId: string;
+  reportId: string;
+  doctorId: string;
+  title: string;
+  summary: string;
+  prescription: string;
+  nextAppointment: string;
+  medicalImages: string[];
+  deliveryChannels: ("email" | "whatsapp")[];
+}) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const patient = state.patients.find((item) => item.id === input.patientId && item.clinicId === input.clinicId);
+  const doctor = state.staff.find((item) => item.id === input.doctorId && item.clinicId === input.clinicId);
+  const report = patient?.reports.find((item) => item.id === input.reportId);
+  if (!patient || !doctor || !report) return undefined;
+
+  report.title = input.title.trim() || report.title;
+  report.summary = input.summary.trim();
+  report.prescription = input.prescription.trim();
+  report.nextAppointment = input.nextAppointment.trim();
+  report.medicalImages = input.medicalImages.map((item) => item.trim()).filter(Boolean);
+  report.deliveryChannels = input.deliveryChannels.length > 0 ? input.deliveryChannels : ["email"];
+  report.doctorName = doctor.name;
+  report.status = "pendiente-aprobacion";
+  report.signedByDoctor = "";
+  delete report.approvedAt;
+
+  patient.doctorApprovalRequired = true;
+  patient.pendingDocuments = Array.from(new Set([...patient.pendingDocuments, report.type]));
+  patient.updatedAt = timestamp;
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: input.clinicId,
+    type: "doctor.report.dictated",
+    message: `${doctor.name} guardo dictado medico para ${patient.name}.`,
+    at: timestamp
+  });
+
+  return { patient, report, doctor };
+}
+
 export function upsertCashTransaction(input: CashTransactionInput) {
   const state = getState();
   const transaction = normalizeCashTransaction({

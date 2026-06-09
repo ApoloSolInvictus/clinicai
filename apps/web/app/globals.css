@@ -935,6 +935,63 @@ h1 {
   font-size: 13px;
 }
 
+.dictation-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(14, 165, 233, 0.12), rgba(5, 13, 29, 0.9)),
+    rgba(5, 13, 29, 0.84);
+}
+
+.patient-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dictation-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dictation-live {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.34);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.dictation-live strong {
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.dictation-live p {
+  color: #fff7d6;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dictation-textarea {
+  min-height: 170px;
+}
+
+.dictation-vocabulary {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-height: 92px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .patient-module {
   display: grid;
   gap: 14px;
@@ -2034,6 +2091,7 @@ body::-webkit-scrollbar-thumb {
   .doctor-support-grid,
   .doctor-report-reader,
   .doctor-service-grid,
+  .patient-context-grid,
   .schedule-editor-row,
   .patient-workspace,
   .patient-form-grid-compact,
