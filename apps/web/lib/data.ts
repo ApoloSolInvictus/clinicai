@@ -60,16 +60,63 @@ export type DoctorSchedule = {
   status: "verificado" | "pendiente" | "conflicto";
 };
 
+export type PatientCommunicationPreference = {
+  email: boolean;
+  whatsapp: boolean;
+};
+
+export type PatientReport = {
+  id: string;
+  title: string;
+  type: "reporte-medico" | "recetario" | "laboratorio" | "imagen" | "referencia" | "seguimiento";
+  status: "borrador" | "pendiente-aprobacion" | "aprobado" | "enviado";
+  doctorName: string;
+  createdAt: string;
+  approvedAt?: string;
+  deliveryChannels: ("email" | "whatsapp")[];
+};
+
+export type PatientInstruction = {
+  id: string;
+  service: string;
+  category: "preparacion" | "medicamento" | "post-consulta" | "recordatorio";
+  status: "pendiente" | "aprobacion-medica" | "aprobado" | "enviado";
+  text: string;
+  channels: ("email" | "whatsapp")[];
+  scheduledFor: string;
+};
+
 export type PatientRecord = {
   id: string;
   clinicId: string;
   name: string;
   documentId: string;
+  birthDate: string;
+  sex: "femenino" | "masculino" | "otro";
+  phone: string;
+  whatsapp: string;
+  email: string;
+  address: string;
+  emergencyContact: string;
+  insuranceProvider: string;
+  allergies: string;
+  chronicConditions: string;
   lastVisit: string;
   nextAppointment: string;
+  nextService: string;
+  assignedDoctor: string;
   risk: "bajo" | "medio" | "alto";
+  communication: PatientCommunicationPreference;
   pendingDocuments: string[];
+  reports: PatientReport[];
+  instructions: PatientInstruction[];
   doctorApprovalRequired: boolean;
+  notes: string;
+  updatedAt: string;
+};
+
+export type PatientUpsertInput = Omit<PatientRecord, "id" | "updatedAt"> & {
+  id?: string;
 };
 
 export type CashRegister = {
@@ -293,35 +340,155 @@ const initialState: CentralState = {
     {
       id: "pat-100",
       clinicId: defaultClinicId,
-      name: "Paciente A",
+      name: "Maria Fernanda Rojas",
       documentId: "CR-0001",
+      birthDate: "1986-03-14",
+      sex: "femenino",
+      phone: "+506 2222-0101",
+      whatsapp: "+506 8888-0101",
+      email: "maria.rojas@example.local",
+      address: "San Jose, Costa Rica",
+      emergencyContact: "Carlos Rojas, +506 8888-1101",
+      insuranceProvider: "Privado",
+      allergies: "Penicilina",
+      chronicConditions: "Hipertension controlada",
       lastVisit: "2026-06-05",
       nextAppointment: "2026-06-10 09:30",
+      nextService: "Consulta general",
+      assignedDoctor: "Dra. Elena Vargas",
       risk: "bajo",
+      communication: { email: true, whatsapp: true },
       pendingDocuments: ["reporte-medico"],
-      doctorApprovalRequired: true
+      reports: [
+        {
+          id: "patrep-100-1",
+          title: "Reporte medico de control",
+          type: "reporte-medico",
+          status: "pendiente-aprobacion",
+          doctorName: "Dra. Elena Vargas",
+          createdAt: "2026-06-05T16:20:00.000Z",
+          deliveryChannels: ["email", "whatsapp"]
+        }
+      ],
+      instructions: [
+        {
+          id: "patins-100-1",
+          service: "Consulta general",
+          category: "recordatorio",
+          status: "pendiente",
+          text: "Enviar recordatorio de cita y confirmar asistencia 24 horas antes.",
+          channels: ["email", "whatsapp"],
+          scheduledFor: "2026-06-09 09:30"
+        }
+      ],
+      doctorApprovalRequired: true,
+      notes: "Paciente solicita recibir copia digital de documentos aprobados.",
+      updatedAt: now
     },
     {
       id: "pat-101",
       clinicId: defaultClinicId,
-      name: "Paciente B",
+      name: "Jorge Alberto Mendez",
       documentId: "CR-0002",
+      birthDate: "1978-11-02",
+      sex: "masculino",
+      phone: "+506 2222-0202",
+      whatsapp: "+506 8888-0202",
+      email: "jorge.mendez@example.local",
+      address: "Heredia, Costa Rica",
+      emergencyContact: "Laura Mendez, +506 8888-1202",
+      insuranceProvider: "INS",
+      allergies: "Sin alergias registradas",
+      chronicConditions: "Diabetes tipo 2",
       lastVisit: "2026-06-03",
       nextAppointment: "2026-06-11 11:00",
+      nextService: "Laboratorio y control",
+      assignedDoctor: "Dr. Marco Solis",
       risk: "medio",
+      communication: { email: true, whatsapp: true },
       pendingDocuments: ["recetario", "orden-laboratorio"],
-      doctorApprovalRequired: true
+      reports: [
+        {
+          id: "patrep-101-1",
+          title: "Recetario de control metabolico",
+          type: "recetario",
+          status: "pendiente-aprobacion",
+          doctorName: "Dr. Marco Solis",
+          createdAt: "2026-06-03T18:10:00.000Z",
+          deliveryChannels: ["email"]
+        },
+        {
+          id: "patrep-101-2",
+          title: "Orden de laboratorio",
+          type: "laboratorio",
+          status: "borrador",
+          doctorName: "Dr. Marco Solis",
+          createdAt: "2026-06-03T18:16:00.000Z",
+          deliveryChannels: ["email", "whatsapp"]
+        }
+      ],
+      instructions: [
+        {
+          id: "patins-101-1",
+          service: "Laboratorio",
+          category: "preparacion",
+          status: "aprobacion-medica",
+          text: "Ayuno de 8 horas antes de la toma de muestra. Confirmar con medico antes de enviar.",
+          channels: ["whatsapp"],
+          scheduledFor: "2026-06-10 08:00"
+        }
+      ],
+      doctorApprovalRequired: true,
+      notes: "Requiere control de medicamentos activos antes de emitir receta.",
+      updatedAt: now
     },
     {
       id: "pat-102",
       clinicId: defaultClinicId,
-      name: "Paciente C",
+      name: "Sofia Camila Alvarez",
       documentId: "CR-0003",
+      birthDate: "1994-07-25",
+      sex: "femenino",
+      phone: "+506 2222-0303",
+      whatsapp: "+506 8888-0303",
+      email: "sofia.alvarez@example.local",
+      address: "Cartago, Costa Rica",
+      emergencyContact: "Daniel Alvarez, +506 8888-1303",
+      insuranceProvider: "Privado",
+      allergies: "Mariscos",
+      chronicConditions: "Asma",
       lastVisit: "2026-05-29",
       nextAppointment: "2026-06-14 15:00",
+      nextService: "Seguimiento respiratorio",
+      assignedDoctor: "Dra. Elena Vargas",
       risk: "alto",
+      communication: { email: true, whatsapp: false },
       pendingDocuments: ["seguimiento", "referencia"],
-      doctorApprovalRequired: true
+      reports: [
+        {
+          id: "patrep-102-1",
+          title: "Seguimiento respiratorio",
+          type: "seguimiento",
+          status: "pendiente-aprobacion",
+          doctorName: "Dra. Elena Vargas",
+          createdAt: "2026-05-29T20:00:00.000Z",
+          deliveryChannels: ["email"]
+        }
+      ],
+      instructions: [
+        {
+          id: "patins-102-1",
+          service: "Seguimiento respiratorio",
+          category: "medicamento",
+          status: "aprobacion-medica",
+          text: "Preparar indicaciones de inhalador y signos de alarma para aprobacion medica.",
+          channels: ["email"],
+          scheduledFor: "2026-06-14 16:30"
+        }
+      ],
+      doctorApprovalRequired: true,
+      notes: "Validar signos de alarma antes de cerrar reporte.",
+      updatedAt: now
     }
   ],
   cashRegisters: [
@@ -456,12 +623,66 @@ declare global {
   var luxAeternaState: CentralState | undefined;
 }
 
+function makeId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+type LegacyPatientRecord = Partial<PatientRecord> &
+  Pick<PatientRecord, "id" | "clinicId" | "name" | "documentId">;
+
+function normalizePatient(patient: LegacyPatientRecord): PatientRecord {
+  const pendingDocuments = patient.pendingDocuments ?? [];
+  const reports = patient.reports ?? pendingDocuments.map((documentName, index) => ({
+    id: `${patient.id}-report-${index + 1}`,
+    title: documentName,
+    type: documentName === "recetario" ? "recetario" : "reporte-medico",
+    status: "pendiente-aprobacion",
+    doctorName: patient.assignedDoctor ?? "Medico pendiente",
+    createdAt: patient.updatedAt ?? now,
+    deliveryChannels: ["email", "whatsapp"]
+  } satisfies PatientReport));
+
+  return {
+    id: patient.id,
+    clinicId: patient.clinicId,
+    name: patient.name,
+    documentId: patient.documentId,
+    birthDate: patient.birthDate ?? "",
+    sex: patient.sex ?? "otro",
+    phone: patient.phone ?? "",
+    whatsapp: patient.whatsapp ?? "",
+    email: patient.email ?? "",
+    address: patient.address ?? "",
+    emergencyContact: patient.emergencyContact ?? "",
+    insuranceProvider: patient.insuranceProvider ?? "",
+    allergies: patient.allergies ?? "",
+    chronicConditions: patient.chronicConditions ?? "",
+    lastVisit: patient.lastVisit ?? "",
+    nextAppointment: patient.nextAppointment ?? "",
+    nextService: patient.nextService ?? "",
+    assignedDoctor: patient.assignedDoctor ?? "",
+    risk: patient.risk ?? "bajo",
+    communication: patient.communication ?? { email: Boolean(patient.email), whatsapp: Boolean(patient.whatsapp) },
+    pendingDocuments,
+    reports,
+    instructions: patient.instructions ?? [],
+    doctorApprovalRequired: patient.doctorApprovalRequired ?? reports.some((report) => report.status === "pendiente-aprobacion"),
+    notes: patient.notes ?? "",
+    updatedAt: patient.updatedAt ?? now
+  };
+}
+
+function ensureStateShape(state: CentralState) {
+  state.patients = state.patients.map((patient) => normalizePatient(patient));
+  return state;
+}
+
 export function getState() {
   if (!globalThis.luxAeternaState) {
     globalThis.luxAeternaState = structuredClone(initialState);
   }
 
-  return globalThis.luxAeternaState;
+  return ensureStateShape(globalThis.luxAeternaState);
 }
 
 export function getStateForAccess(access: { allClinics: boolean; clinicIds: string[] }) {
@@ -502,6 +723,33 @@ export function createTask(input: Omit<AutomationTask, "id" | "status" | "create
   });
 
   return task;
+}
+
+export function upsertPatient(input: PatientUpsertInput) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const normalized = normalizePatient({
+    ...input,
+    id: input.id ?? makeId("pat"),
+    updatedAt: timestamp
+  });
+  const index = state.patients.findIndex((patient) => patient.id === normalized.id);
+
+  if (index >= 0) {
+    state.patients[index] = normalized;
+  } else {
+    state.patients.unshift(normalized);
+  }
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: normalized.clinicId,
+    type: index >= 0 ? "patient.updated" : "patient.created",
+    message: `${normalized.name} ${index >= 0 ? "actualizado" : "ingresado"} en el perfil de pacientes.`,
+    at: timestamp
+  });
+
+  return normalized;
 }
 
 export function patchTask(taskId: string, patch: Partial<AutomationTask>) {

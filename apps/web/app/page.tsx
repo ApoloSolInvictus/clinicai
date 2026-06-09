@@ -15,17 +15,24 @@ import {
   Cloud,
   Database,
   FileClock,
+  FilePlus2,
   FileText,
   HeartPulse,
   KeyRound,
   LogIn,
   LogOut,
   Mail,
+  MessageCircle,
+  Phone,
   Play,
+  Plus,
   RefreshCw,
+  Save,
+  Send,
   Settings,
   ShieldCheck,
   Stethoscope,
+  Trash2,
   UserCog,
   UserRound,
   Users,
@@ -39,7 +46,9 @@ import type {
   CashRegister,
   CentralState,
   DoctorSchedule,
+  PatientInstruction,
   PatientRecord,
+  PatientReport,
   ReportSummary,
   StaffMember,
   TaskIntent
@@ -82,6 +91,38 @@ type TaskForm = {
   prompt: string;
 };
 
+type PatientChannel = "email" | "whatsapp";
+
+const reportTypeLabels: Record<PatientReport["type"], string> = {
+  "reporte-medico": "Reporte medico",
+  recetario: "Recetario",
+  laboratorio: "Laboratorio",
+  imagen: "Imagen",
+  referencia: "Referencia",
+  seguimiento: "Seguimiento"
+};
+
+const reportStatusLabels: Record<PatientReport["status"], string> = {
+  borrador: "Borrador",
+  "pendiente-aprobacion": "Pendiente aprobacion",
+  aprobado: "Aprobado",
+  enviado: "Enviado"
+};
+
+const instructionCategoryLabels: Record<PatientInstruction["category"], string> = {
+  preparacion: "Preparacion",
+  medicamento: "Medicamento",
+  "post-consulta": "Post consulta",
+  recordatorio: "Recordatorio"
+};
+
+const instructionStatusLabels: Record<PatientInstruction["status"], string> = {
+  pendiente: "Pendiente",
+  "aprobacion-medica": "Aprobacion medica",
+  aprobado: "Aprobado",
+  enviado: "Enviado"
+};
+
 const navItems: NavItem[] = [
   { id: "dashboard", icon: Activity, label: "Dashboard" },
   { id: "agenda", icon: CalendarDays, label: "Agenda" },
@@ -119,6 +160,65 @@ function money(value: number, currency: string) {
     currency,
     maximumFractionDigits: 0
   }).format(value);
+}
+
+function splitList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function createEmptyPatient(clinicId: string): PatientRecord {
+  return {
+    id: "",
+    clinicId,
+    name: "",
+    documentId: "",
+    birthDate: "",
+    sex: "otro",
+    phone: "",
+    whatsapp: "",
+    email: "",
+    address: "",
+    emergencyContact: "",
+    insuranceProvider: "",
+    allergies: "",
+    chronicConditions: "",
+    lastVisit: new Date().toISOString().slice(0, 10),
+    nextAppointment: "",
+    nextService: "",
+    assignedDoctor: "",
+    risk: "bajo",
+    communication: { email: true, whatsapp: true },
+    pendingDocuments: [],
+    reports: [],
+    instructions: [],
+    doctorApprovalRequired: true,
+    notes: "",
+    updatedAt: ""
+  };
+}
+
+function clonePatient(patient: PatientRecord): PatientRecord {
+  return {
+    ...patient,
+    communication: { ...patient.communication },
+    pendingDocuments: [...patient.pendingDocuments],
+    reports: patient.reports.map((report) => ({
+      ...report,
+      deliveryChannels: [...report.deliveryChannels]
+    })),
+    instructions: patient.instructions.map((instruction) => ({
+      ...instruction,
+      channels: [...instruction.channels]
+    }))
+  };
+}
+
+function toggleChannel(channels: PatientChannel[], channel: PatientChannel, enabled: boolean) {
+  if (enabled) return Array.from(new Set([...channels, channel]));
+  return channels.filter((item) => item !== channel);
 }
 
 export default function Home() {
@@ -203,6 +303,63 @@ export default function Home() {
 
   async function submitTask() {
     await sendTask(form);
+  }
+
+  async function savePatient(patient: PatientRecord) {
+    setBusy(true);
+    try {
+      const { updatedAt: _updatedAt, ...payloadPatient } = patient;
+      const response = await fetch("/api/patients", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({
+          ...payloadPatient,
+          id: payloadPatient.id || undefined,
+          clinicId
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo guardar el paciente.");
+      }
+
+      setState(payload.state);
+      setResult(JSON.stringify({ patient: payload.patient, saved: true }, null, 2));
+      return payload.patient as PatientRecord;
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo guardar el paciente.");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function preparePatientReminders(patient: PatientRecord) {
+    await sendTask({
+      clinicId: patient.clinicId,
+      intent: "correos",
+      priority: "alta",
+      prompt:
+        `Prepara recordatorios para ${patient.name} (${patient.documentId}). ` +
+        `Proxima cita: ${patient.nextAppointment || "pendiente"}. Servicio: ${patient.nextService || "pendiente"}. ` +
+        `Canales autorizados: ${patient.communication.email ? "email " : ""}${patient.communication.whatsapp ? "whatsapp" : ""}. ` +
+        `Usa correo ${patient.email || "sin correo"} y WhatsApp ${patient.whatsapp || "sin whatsapp"}. ` +
+        "Devuelve mensajes listos para revision humana antes de enviar."
+    });
+  }
+
+  async function preparePatientClinicalDocuments(patient: PatientRecord) {
+    await sendTask({
+      clinicId: patient.clinicId,
+      intent: "historial",
+      priority: "critica",
+      prompt:
+        `Prepara borradores clinicos para ${patient.name} (${patient.documentId}). ` +
+        `Documentos pendientes: ${patient.pendingDocuments.join(", ") || "sin documentos pendientes"}. ` +
+        `Reportes actuales: ${patient.reports.map((report) => `${report.title} - ${report.status}`).join("; ") || "sin reportes"}. ` +
+        `Instrucciones: ${patient.instructions.map((item) => `${item.service} - ${item.category}: ${item.text}`).join("; ") || "sin instrucciones"}. ` +
+        "Todo reporte medico, recetario o indicacion de medicamentos debe quedar como borrador con aprobacion medica humana requerida antes de envio por correo o WhatsApp."
+    });
   }
 
   async function runAutomation(template: AutomationTemplate) {
@@ -496,7 +653,16 @@ export default function Home() {
             {activeModule === "agenda" ? (
               <AgendaModule schedules={clinicSchedules} automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
             ) : null}
-            {activeModule === "pacientes" ? <PatientsModule patients={clinicPatients} /> : null}
+            {activeModule === "pacientes" ? (
+              <PatientsModule
+                patients={clinicPatients}
+                clinicId={clinicId}
+                busy={busy}
+                onSavePatient={savePatient}
+                onPrepareReminders={preparePatientReminders}
+                onPrepareClinicalDocuments={preparePatientClinicalDocuments}
+              />
+            ) : null}
             {activeModule === "medicos" ? <DoctorsModule staff={clinicStaff} schedules={clinicSchedules} /> : null}
             {activeModule === "caja" ? (
               <CashModule cashRegisters={clinicCash} automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
@@ -695,34 +861,687 @@ function AgendaModule({
   );
 }
 
-function PatientsModule({ patients }: { patients: PatientRecord[] }) {
+function PatientsModule({
+  patients,
+  clinicId,
+  busy,
+  onSavePatient,
+  onPrepareReminders,
+  onPrepareClinicalDocuments
+}: {
+  patients: PatientRecord[];
+  clinicId: string;
+  busy: boolean;
+  onSavePatient: (patient: PatientRecord) => Promise<PatientRecord | undefined>;
+  onPrepareReminders: (patient: PatientRecord) => void;
+  onPrepareClinicalDocuments: (patient: PatientRecord) => void;
+}) {
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [selectedPatientId, setSelectedPatientId] = useState(patients[0]?.id ?? "");
+  const selectedPatient = patients.find((patient) => patient.id === selectedPatientId);
+  const [draft, setDraft] = useState<PatientRecord>(() => (selectedPatient ? clonePatient(selectedPatient) : createEmptyPatient(clinicId)));
+  const [reportDraft, setReportDraft] = useState({
+    title: "",
+    type: "reporte-medico" as PatientReport["type"],
+    status: "pendiente-aprobacion" as PatientReport["status"],
+    doctorName: "",
+    deliveryChannels: ["email", "whatsapp"] as PatientChannel[]
+  });
+  const [instructionDraft, setInstructionDraft] = useState({
+    service: "",
+    category: "preparacion" as PatientInstruction["category"],
+    status: "aprobacion-medica" as PatientInstruction["status"],
+    text: "",
+    scheduledFor: "",
+    channels: ["email", "whatsapp"] as PatientChannel[]
+  });
+
+  useEffect(() => {
+    if (mode === "existing" && (!selectedPatientId || !patients.some((patient) => patient.id === selectedPatientId))) {
+      setSelectedPatientId(patients[0]?.id ?? "");
+    }
+  }, [mode, patients, selectedPatientId]);
+
+  useEffect(() => {
+    if (mode === "new") {
+      setDraft(createEmptyPatient(clinicId));
+      return;
+    }
+
+    setDraft(selectedPatient ? clonePatient(selectedPatient) : createEmptyPatient(clinicId));
+  }, [clinicId, mode, selectedPatient]);
+
+  function updateDraft<Key extends keyof PatientRecord>(field: Key, value: PatientRecord[Key]) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewPatient() {
+    setMode("new");
+    setSelectedPatientId("");
+    setDraft(createEmptyPatient(clinicId));
+  }
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = await onSavePatient({
+      ...draft,
+      clinicId,
+      pendingDocuments: Array.from(new Set(draft.pendingDocuments.map((item) => item.trim()).filter(Boolean))),
+      doctorApprovalRequired:
+        draft.doctorApprovalRequired ||
+        draft.reports.some((report) => report.status === "pendiente-aprobacion") ||
+        draft.instructions.some((instruction) => instruction.status === "aprobacion-medica")
+    });
+
+    if (saved) {
+      setMode("existing");
+      setSelectedPatientId(saved.id);
+    }
+  }
+
+  function addReport() {
+    const title = reportDraft.title.trim();
+    if (!title) return;
+
+    const report: PatientReport = {
+      id: `draft-report-${Date.now()}`,
+      title,
+      type: reportDraft.type,
+      status: reportDraft.status,
+      doctorName: reportDraft.doctorName.trim() || draft.assignedDoctor || "Medico pendiente",
+      createdAt: new Date().toISOString(),
+      deliveryChannels: reportDraft.deliveryChannels
+    };
+
+    setDraft((current) => ({
+      ...current,
+      pendingDocuments:
+        report.status === "pendiente-aprobacion"
+          ? Array.from(new Set([...current.pendingDocuments, report.type]))
+          : current.pendingDocuments,
+      reports: [report, ...current.reports],
+      doctorApprovalRequired: current.doctorApprovalRequired || report.status === "pendiente-aprobacion"
+    }));
+    setReportDraft((current) => ({ ...current, title: "", doctorName: "" }));
+  }
+
+  function addInstruction() {
+    const service = instructionDraft.service.trim();
+    const text = instructionDraft.text.trim();
+    if (!service || !text) return;
+
+    const instruction: PatientInstruction = {
+      id: `draft-instruction-${Date.now()}`,
+      service,
+      category: instructionDraft.category,
+      status: instructionDraft.status,
+      text,
+      channels: instructionDraft.channels,
+      scheduledFor: instructionDraft.scheduledFor || draft.nextAppointment || new Date().toISOString().slice(0, 10)
+    };
+
+    setDraft((current) => ({
+      ...current,
+      instructions: [instruction, ...current.instructions],
+      doctorApprovalRequired: current.doctorApprovalRequired || instruction.status === "aprobacion-medica"
+    }));
+    setInstructionDraft((current) => ({ ...current, service: "", text: "" }));
+  }
+
+  function removeReport(reportId: string) {
+    setDraft((current) => ({ ...current, reports: current.reports.filter((report) => report.id !== reportId) }));
+  }
+
+  function removeInstruction(instructionId: string) {
+    setDraft((current) => ({
+      ...current,
+      instructions: current.instructions.filter((instruction) => instruction.id !== instructionId)
+    }));
+  }
+
+  const pendingCount = patients.reduce((total, patient) => total + patient.pendingDocuments.length, 0);
+
   return (
-    <Panel icon={Users} title="Pacientes y documentos">
-      <div className="surface-list">
-        {patients.map((patient) => (
-          <div className="surface-row patient-row" key={patient.id}>
-            <div>
-              <strong>{patient.name}</strong>
-              <p>
-                {patient.documentId} - Ultima visita {patient.lastVisit} - Proxima {patient.nextAppointment}
-              </p>
-              <div className="tag-row">
+    <Panel icon={Users} title="Pacientes">
+      <div className="patient-module">
+        <div className="patient-toolbar">
+          <div className="row-metrics">
+            <span>{patients.length} pacientes</span>
+            <span>{pendingCount} documentos pendientes</span>
+          </div>
+          <button className="btn primary" type="button" onClick={startNewPatient} title="Ingresar paciente">
+            <Plus size={18} />
+            Nuevo paciente
+          </button>
+        </div>
+
+        <div className="patient-workspace">
+          <aside className="patient-directory" aria-label="Directorio de pacientes">
+            {patients.map((patient) => (
+              <button
+                className={`patient-list-item ${mode === "existing" && patient.id === selectedPatientId ? "active" : ""}`}
+                type="button"
+                key={patient.id}
+                onClick={() => {
+                  setMode("existing");
+                  setSelectedPatientId(patient.id);
+                }}
+              >
+                <strong>{patient.name}</strong>
+                <span>{patient.documentId}</span>
+                <span>{patient.nextAppointment || "Cita pendiente"}</span>
                 <span className={`status-chip riesgo-${patient.risk}`}>riesgo {patient.risk}</span>
-                {patient.pendingDocuments.map((doc) => (
-                  <span className="tag" key={doc}>
-                    {doc}
-                  </span>
+              </button>
+            ))}
+            {patients.length === 0 ? <div className="empty-state">Sin pacientes registrados.</div> : null}
+          </aside>
+
+          <form className="patient-editor" onSubmit={handleSave}>
+            <div className="patient-editor-header">
+              <div>
+                <h3>{draft.id ? draft.name || "Paciente" : "Nuevo paciente"}</h3>
+                <p>
+                  {draft.documentId || "Documento pendiente"} - {draft.assignedDoctor || "Medico pendiente"}
+                </p>
+              </div>
+              <div className="button-row">
+                {draft.id ? (
+                  <>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => onPrepareReminders(draft)}
+                      disabled={busy}
+                      title="Preparar recordatorios"
+                    >
+                      <Send size={18} />
+                      Recordatorios
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => onPrepareClinicalDocuments(draft)}
+                      disabled={busy}
+                      title="Preparar documentos clinicos"
+                    >
+                      <FilePlus2 size={18} />
+                      Documentos
+                    </button>
+                  </>
+                ) : null}
+                <button className="btn primary" type="submit" disabled={busy} title="Guardar paciente">
+                  <Save size={18} />
+                  Guardar
+                </button>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>Datos del paciente</h3>
+              <div className="patient-form-grid">
+                <div className="field">
+                  <label htmlFor="patient-name">Nombre completo</label>
+                  <input
+                    id="patient-name"
+                    value={draft.name}
+                    onChange={(event) => updateDraft("name", event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-document">Documento</label>
+                  <input
+                    id="patient-document"
+                    value={draft.documentId}
+                    onChange={(event) => updateDraft("documentId", event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-birth">Fecha nacimiento</label>
+                  <input
+                    id="patient-birth"
+                    type="date"
+                    value={draft.birthDate}
+                    onChange={(event) => updateDraft("birthDate", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-sex">Sexo</label>
+                  <select id="patient-sex" value={draft.sex} onChange={(event) => updateDraft("sex", event.target.value as PatientRecord["sex"])}>
+                    <option value="femenino">Femenino</option>
+                    <option value="masculino">Masculino</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>Contacto y avisos</h3>
+              <div className="patient-form-grid">
+                <div className="field">
+                  <label htmlFor="patient-phone">Telefono</label>
+                  <input id="patient-phone" value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-whatsapp">WhatsApp</label>
+                  <input
+                    id="patient-whatsapp"
+                    value={draft.whatsapp}
+                    onChange={(event) => updateDraft("whatsapp", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-email">Correo</label>
+                  <input
+                    id="patient-email"
+                    type="email"
+                    value={draft.email}
+                    onChange={(event) => updateDraft("email", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-emergency">Contacto emergencia</label>
+                  <input
+                    id="patient-emergency"
+                    value={draft.emergencyContact}
+                    onChange={(event) => updateDraft("emergencyContact", event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.communication.email}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        communication: { ...current.communication, email: event.target.checked }
+                      }))
+                    }
+                  />
+                  <Mail size={16} />
+                  Email
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.communication.whatsapp}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        communication: { ...current.communication, whatsapp: event.target.checked }
+                      }))
+                    }
+                  />
+                  <MessageCircle size={16} />
+                  WhatsApp
+                </label>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>Perfil clinico</h3>
+              <div className="patient-form-grid">
+                <div className="field">
+                  <label htmlFor="patient-address">Direccion</label>
+                  <input id="patient-address" value={draft.address} onChange={(event) => updateDraft("address", event.target.value)} />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-insurance">Seguro</label>
+                  <input
+                    id="patient-insurance"
+                    value={draft.insuranceProvider}
+                    onChange={(event) => updateDraft("insuranceProvider", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-allergies">Alergias</label>
+                  <input
+                    id="patient-allergies"
+                    value={draft.allergies}
+                    onChange={(event) => updateDraft("allergies", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-conditions">Condiciones</label>
+                  <input
+                    id="patient-conditions"
+                    value={draft.chronicConditions}
+                    onChange={(event) => updateDraft("chronicConditions", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-last-visit">Ultima visita</label>
+                  <input
+                    id="patient-last-visit"
+                    type="date"
+                    value={draft.lastVisit}
+                    onChange={(event) => updateDraft("lastVisit", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-next">Proxima cita</label>
+                  <input
+                    id="patient-next"
+                    value={draft.nextAppointment}
+                    onChange={(event) => updateDraft("nextAppointment", event.target.value)}
+                    placeholder="2026-06-10 09:30"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-service">Servicio</label>
+                  <input
+                    id="patient-service"
+                    value={draft.nextService}
+                    onChange={(event) => updateDraft("nextService", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-doctor">Medico asignado</label>
+                  <input
+                    id="patient-doctor"
+                    value={draft.assignedDoctor}
+                    onChange={(event) => updateDraft("assignedDoctor", event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-risk">Riesgo</label>
+                  <select id="patient-risk" value={draft.risk} onChange={(event) => updateDraft("risk", event.target.value as PatientRecord["risk"])}>
+                    <option value="bajo">Bajo</option>
+                    <option value="medio">Medio</option>
+                    <option value="alto">Alto</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="patient-pending">Documentos pendientes</label>
+                  <input
+                    id="patient-pending"
+                    value={draft.pendingDocuments.join(", ")}
+                    onChange={(event) => updateDraft("pendingDocuments", splitList(event.target.value))}
+                  />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="patient-notes">Notas</label>
+                <textarea id="patient-notes" value={draft.notes} onChange={(event) => updateDraft("notes", event.target.value)} />
+              </div>
+              <div className="checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.doctorApprovalRequired}
+                    onChange={(event) => updateDraft("doctorApprovalRequired", event.target.checked)}
+                  />
+                  <AlertTriangle size={16} />
+                  Aprobacion medica
+                </label>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <div className="section-title-row">
+                <h3>Reportes y recetas</h3>
+                <span className="status-chip">{draft.reports.length}</span>
+              </div>
+              <div className="patient-form-grid patient-form-grid-compact">
+                <div className="field">
+                  <label htmlFor="report-title">Titulo</label>
+                  <input id="report-title" value={reportDraft.title} onChange={(event) => setReportDraft((current) => ({ ...current, title: event.target.value }))} />
+                </div>
+                <div className="field">
+                  <label htmlFor="report-type">Tipo</label>
+                  <select
+                    id="report-type"
+                    value={reportDraft.type}
+                    onChange={(event) => setReportDraft((current) => ({ ...current, type: event.target.value as PatientReport["type"] }))}
+                  >
+                    {Object.entries(reportTypeLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="report-status">Estado</label>
+                  <select
+                    id="report-status"
+                    value={reportDraft.status}
+                    onChange={(event) => setReportDraft((current) => ({ ...current, status: event.target.value as PatientReport["status"] }))}
+                  >
+                    {Object.entries(reportStatusLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="report-doctor">Medico</label>
+                  <input
+                    id="report-doctor"
+                    value={reportDraft.doctorName}
+                    onChange={(event) => setReportDraft((current) => ({ ...current, doctorName: event.target.value }))}
+                    placeholder={draft.assignedDoctor || "Medico"}
+                  />
+                </div>
+              </div>
+              <div className="inline-actions">
+                <div className="checkbox-row compact">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={reportDraft.deliveryChannels.includes("email")}
+                      onChange={(event) =>
+                        setReportDraft((current) => ({
+                          ...current,
+                          deliveryChannels: toggleChannel(current.deliveryChannels, "email", event.target.checked)
+                        }))
+                      }
+                    />
+                    <Mail size={16} />
+                    Email
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={reportDraft.deliveryChannels.includes("whatsapp")}
+                      onChange={(event) =>
+                        setReportDraft((current) => ({
+                          ...current,
+                          deliveryChannels: toggleChannel(current.deliveryChannels, "whatsapp", event.target.checked)
+                        }))
+                      }
+                    />
+                    <MessageCircle size={16} />
+                    WhatsApp
+                  </label>
+                </div>
+                <button className="btn" type="button" onClick={addReport} title="Agregar reporte">
+                  <Plus size={18} />
+                  Agregar reporte
+                </button>
+              </div>
+              <div className="nested-list">
+                {draft.reports.map((report) => (
+                  <div className="nested-row" key={report.id}>
+                    <div>
+                      <strong>{report.title}</strong>
+                      <p>
+                        {reportTypeLabels[report.type]} - {report.doctorName}
+                      </p>
+                      <div className="tag-row">
+                        {report.deliveryChannels.map((channel) => (
+                          <span className="tag" key={channel}>
+                            {channel}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="nested-actions">
+                      <span className={`status-chip ${report.status}`}>{reportStatusLabels[report.status]}</span>
+                      <button className="icon-btn danger" type="button" onClick={() => removeReport(report.id)} title="Quitar reporte">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
-            {patient.doctorApprovalRequired ? (
-              <span className="approval-pill">
-                <AlertTriangle size={16} />
-                Aprobacion medica
+
+            <div className="form-section">
+              <div className="section-title-row">
+                <h3>Instrucciones y preparacion</h3>
+                <span className="status-chip">{draft.instructions.length}</span>
+              </div>
+              <div className="patient-form-grid patient-form-grid-compact">
+                <div className="field">
+                  <label htmlFor="instruction-service">Servicio</label>
+                  <input
+                    id="instruction-service"
+                    value={instructionDraft.service}
+                    onChange={(event) => setInstructionDraft((current) => ({ ...current, service: event.target.value }))}
+                    placeholder={draft.nextService || "Servicio"}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="instruction-category">Categoria</label>
+                  <select
+                    id="instruction-category"
+                    value={instructionDraft.category}
+                    onChange={(event) =>
+                      setInstructionDraft((current) => ({ ...current, category: event.target.value as PatientInstruction["category"] }))
+                    }
+                  >
+                    {Object.entries(instructionCategoryLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="instruction-status">Estado</label>
+                  <select
+                    id="instruction-status"
+                    value={instructionDraft.status}
+                    onChange={(event) =>
+                      setInstructionDraft((current) => ({ ...current, status: event.target.value as PatientInstruction["status"] }))
+                    }
+                  >
+                    {Object.entries(instructionStatusLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="instruction-schedule">Programado</label>
+                  <input
+                    id="instruction-schedule"
+                    value={instructionDraft.scheduledFor}
+                    onChange={(event) => setInstructionDraft((current) => ({ ...current, scheduledFor: event.target.value }))}
+                    placeholder={draft.nextAppointment || "Fecha y hora"}
+                  />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="instruction-text">Indicacion</label>
+                <textarea
+                  id="instruction-text"
+                  value={instructionDraft.text}
+                  onChange={(event) => setInstructionDraft((current) => ({ ...current, text: event.target.value }))}
+                />
+              </div>
+              <div className="inline-actions">
+                <div className="checkbox-row compact">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={instructionDraft.channels.includes("email")}
+                      onChange={(event) =>
+                        setInstructionDraft((current) => ({
+                          ...current,
+                          channels: toggleChannel(current.channels, "email", event.target.checked)
+                        }))
+                      }
+                    />
+                    <Mail size={16} />
+                    Email
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={instructionDraft.channels.includes("whatsapp")}
+                      onChange={(event) =>
+                        setInstructionDraft((current) => ({
+                          ...current,
+                          channels: toggleChannel(current.channels, "whatsapp", event.target.checked)
+                        }))
+                      }
+                    />
+                    <MessageCircle size={16} />
+                    WhatsApp
+                  </label>
+                </div>
+                <button className="btn" type="button" onClick={addInstruction} title="Agregar instruccion">
+                  <Plus size={18} />
+                  Agregar instruccion
+                </button>
+              </div>
+              <div className="nested-list">
+                {draft.instructions.map((instruction) => (
+                  <div className="nested-row" key={instruction.id}>
+                    <div>
+                      <strong>{instruction.service}</strong>
+                      <p>
+                        {instructionCategoryLabels[instruction.category]} - {instruction.text}
+                      </p>
+                      <div className="tag-row">
+                        <span className="tag">{instruction.scheduledFor}</span>
+                        {instruction.channels.map((channel) => (
+                          <span className="tag" key={channel}>
+                            {channel}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="nested-actions">
+                      <span className={`status-chip ${instruction.status}`}>{instructionStatusLabels[instruction.status]}</span>
+                      <button
+                        className="icon-btn danger"
+                        type="button"
+                        onClick={() => removeInstruction(instruction.id)}
+                        title="Quitar instruccion"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="contact-strip">
+              <span>
+                <Phone size={16} />
+                {draft.phone || "Telefono pendiente"}
               </span>
-            ) : null}
-          </div>
-        ))}
+              <span>
+                <MessageCircle size={16} />
+                {draft.whatsapp || "WhatsApp pendiente"}
+              </span>
+              <span>
+                <Mail size={16} />
+                {draft.email || "Correo pendiente"}
+              </span>
+            </div>
+          </form>
+        </div>
       </div>
     </Panel>
   );
