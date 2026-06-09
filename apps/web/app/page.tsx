@@ -943,12 +943,12 @@ export default function Home() {
   if (session.loading) {
     return (
       <AuthShell>
-        <div className="auth-card">
+        <div className="auth-card auth-status-card">
           <div className="auth-mark">
             <Stethoscope size={28} />
           </div>
-          <h1>Lux Aeterna Clinical AI</h1>
-          <p className="muted-text">Validando sesion operativa.</p>
+          <h1>OpenClinic</h1>
+          <p className="muted-text">Validando sesion clinica segura.</p>
         </div>
       </AuthShell>
     );
@@ -957,13 +957,13 @@ export default function Home() {
   if (!session.configured) {
     return (
       <AuthShell>
-        <div className="auth-card">
+        <div className="auth-card auth-status-card">
           <div className="auth-mark">
             <KeyRound size={28} />
           </div>
-          <h1>Firebase pendiente</h1>
+          <h1>OpenClinic</h1>
           <p className="muted-text">
-            Configura las variables NEXT_PUBLIC_FIREBASE y FIREBASE para activar el acceso por clinica.
+            Firebase esta pendiente de configuracion para activar el acceso clinico por sede.
           </p>
         </div>
       </AuthShell>
@@ -978,7 +978,7 @@ export default function Home() {
             <LogIn size={28} />
           </div>
           <div>
-            <h1>Lux Aeterna Clinical AI</h1>
+            <h1>OpenClinic</h1>
             <p className="muted-text">Acceso clinico autorizado.</p>
           </div>
           <div className="field">
@@ -1207,7 +1207,30 @@ export default function Home() {
 }
 
 function AuthShell({ children }: { children: ReactNode }) {
-  return <main className="auth-shell">{children}</main>;
+  return (
+    <main className="auth-shell">
+      <section className="auth-hero-copy" aria-label="OpenClinic">
+        <div className="auth-hero-mark">
+          <Stethoscope size={30} />
+        </div>
+        <div>
+          <span className="auth-kicker">Clinical Intelligence Platform</span>
+          <h1>OpenClinic</h1>
+          <p>
+            Una experiencia clinica de clase mundial para centros medicos que exigen precision, continuidad operativa y
+            una atencion al paciente impecable.
+          </p>
+        </div>
+        <div className="auth-hero-stats" aria-label="Indicadores de confianza">
+          <span>Precision</span>
+          <span>Seguridad</span>
+          <span>Continuidad</span>
+          <span>Excelencia</span>
+        </div>
+      </section>
+      <section className="auth-panel-wrap">{children}</section>
+    </main>
+  );
 }
 
 function Panel({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {

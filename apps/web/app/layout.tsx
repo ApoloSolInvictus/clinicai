@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Lux Aeterna Clinical AI",
-  description: "Hybrid clinical AI command center for Vercel and local OpenClaw Docker nodes."
+  title: "OpenClinic",
+  description: "Premium clinical operations platform with local OpenClaw automation."
 };
 
 export default function RootLayout({
