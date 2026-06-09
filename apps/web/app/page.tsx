@@ -42,6 +42,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type {
+  AppointmentRecord,
   AutomationTemplate,
   CashRegister,
   CentralState,
@@ -50,6 +51,7 @@ import type {
   PatientRecord,
   PatientReport,
   ReportSummary,
+  ServiceCatalogItem,
   StaffMember,
   TaskIntent
 } from "@/lib/data";
@@ -120,6 +122,34 @@ const instructionStatusLabels: Record<PatientInstruction["status"], string> = {
   pendiente: "Pendiente",
   "aprobacion-medica": "Aprobacion medica",
   aprobado: "Aprobado",
+  enviado: "Enviado"
+};
+
+const appointmentStatusLabels: Record<AppointmentRecord["status"], string> = {
+  solicitada: "Solicitada",
+  confirmada: "Confirmada",
+  "en-consulta": "En consulta",
+  completada: "Completada",
+  cancelada: "Cancelada"
+};
+
+const paymentStatusLabels: Record<AppointmentRecord["paymentStatus"], string> = {
+  pendiente: "Pendiente",
+  pagado: "Pagado",
+  facturado: "Facturado"
+};
+
+const reminderStatusLabels: Record<AppointmentRecord["reminderStatus"], string> = {
+  pendiente: "Pendiente",
+  programado: "Programado",
+  enviado: "Enviado",
+  fallo: "Fallo"
+};
+
+const reportDeliveryStatusLabels: Record<AppointmentRecord["reportDeliveryStatus"], string> = {
+  pendiente: "Pendiente",
+  "aprobacion-medica": "Aprobacion medica",
+  "listo-envio": "Listo envio",
   enviado: "Enviado"
 };
 
@@ -221,6 +251,98 @@ function toggleChannel(channels: PatientChannel[], channel: PatientChannel, enab
   return channels.filter((item) => item !== channel);
 }
 
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function toLocalDateTimeInput(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function addMinutesToInput(value: string, minutes: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  date.setMinutes(date.getMinutes() + minutes);
+  return toLocalDateTimeInput(date);
+}
+
+function defaultAppointmentStart() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(9, 0, 0, 0);
+  return toLocalDateTimeInput(date);
+}
+
+function dateKey(value: string) {
+  return value.slice(0, 10);
+}
+
+function readableDate(value: string) {
+  if (!value) return "Fecha pendiente";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.replace("T", " ");
+  return new Intl.DateTimeFormat("es-CR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short"
+  }).format(date);
+}
+
+function readableTime(value: string) {
+  if (!value) return "--:--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(11, 16);
+  return new Intl.DateTimeFormat("es-CR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function createEmptyAppointment(
+  clinicId: string,
+  patients: PatientRecord[],
+  staff: StaffMember[],
+  services: ServiceCatalogItem[]
+): AppointmentRecord {
+  const doctors = staff.filter((member) => member.role === "medico");
+  const patient = patients[0];
+  const doctor = doctors[0] ?? staff[0];
+  const service = services[0];
+  const startsAt = defaultAppointmentStart();
+  const duration = service?.durationMinutes ?? 30;
+
+  return {
+    id: "",
+    clinicId,
+    patientId: patient?.id ?? "",
+    patientName: patient?.name ?? "",
+    doctorId: doctor?.id ?? "",
+    doctorName: doctor?.name ?? "",
+    serviceId: service?.id ?? "",
+    serviceName: service?.name ?? "",
+    startsAt,
+    endsAt: addMinutesToInput(startsAt, duration),
+    price: service?.price ?? 0,
+    currency: service?.currency ?? "USD",
+    doctorHonorarium: service?.doctorHonorarium ?? 0,
+    status: "solicitada",
+    paymentStatus: "pendiente",
+    reminderChannels: ["email", "whatsapp"],
+    reminderStatus: "pendiente",
+    reportDeliveryStatus: service?.requiresReportApproval ? "aprobacion-medica" : "pendiente",
+    createdBy: "Call Center",
+    notes: service?.preparationInstructions ?? "",
+    updatedAt: ""
+  };
+}
+
+function cloneAppointment(appointment: AppointmentRecord): AppointmentRecord {
+  return {
+    ...appointment,
+    reminderChannels: [...appointment.reminderChannels]
+  };
+}
+
 export default function Home() {
   const session = useFirebaseSession();
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
@@ -243,6 +365,8 @@ export default function Home() {
   const clinicId = selectedClinic?.id ?? form.clinicId;
   const clinicStaff = state?.staff.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicSchedules = state?.schedules.filter((item) => item.clinicId === clinicId) ?? [];
+  const clinicServices = state?.serviceCatalog.filter((item) => item.clinicId === clinicId) ?? [];
+  const clinicAppointments = state?.appointments.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicPatients = state?.patients.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicCash = state?.cashRegisters.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicReports = state?.reports.filter((item) => item.clinicId === clinicId) ?? [];
@@ -332,6 +456,84 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveAppointment(appointment: AppointmentRecord) {
+    setBusy(true);
+    try {
+      const { updatedAt: _updatedAt, ...payloadAppointment } = appointment;
+      const response = await fetch("/api/appointments", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({
+          ...payloadAppointment,
+          id: payloadAppointment.id || undefined,
+          clinicId
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo guardar la cita.");
+      }
+
+      setState(payload.state);
+      setResult(
+        JSON.stringify(
+          {
+            appointment: payload.appointment,
+            conflicts: payload.conflicts,
+            saved: true
+          },
+          null,
+          2
+        )
+      );
+      return payload.appointment as AppointmentRecord;
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo guardar la cita.");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function prepareAppointmentReminders(appointment: AppointmentRecord) {
+    const patient = clinicPatients.find((item) => item.id === appointment.patientId);
+    const service = clinicServices.find((item) => item.id === appointment.serviceId);
+
+    await sendTask({
+      clinicId: appointment.clinicId,
+      intent: "correos",
+      priority: "alta",
+      prompt:
+        `Prepara recordatorios de cita para ${appointment.patientName} (${patient?.documentId ?? "documento pendiente"}). ` +
+        `Fecha: ${appointment.startsAt.replace("T", " ")}. Medico: ${appointment.doctorName}. ` +
+        `Servicio: ${appointment.serviceName}. Precio: ${money(appointment.price, appointment.currency)}. ` +
+        `Canales autorizados: ${appointment.reminderChannels.join(", ")}. ` +
+        `Correo: ${patient?.email || "sin correo"}. WhatsApp: ${patient?.whatsapp || "sin whatsapp"}. ` +
+        `Preparacion: ${service?.preparationInstructions || appointment.notes || "sin preparacion registrada"}. ` +
+        "Devuelve mensajes listos para revision humana antes de enviar por correo o WhatsApp."
+    });
+  }
+
+  async function prepareAgendaReview() {
+    const agendaSummary = clinicAppointments
+      .slice(0, 12)
+      .map(
+        (appointment) =>
+          `${appointment.startsAt} | ${appointment.doctorName} | ${appointment.patientName} | ${appointment.serviceName} | ${appointment.status}`
+      )
+      .join("\n");
+
+    await sendTask({
+      clinicId,
+      intent: "agenda",
+      priority: "alta",
+      prompt:
+        "Revisa la agenda de la clinica con horarios medicos, citas, posibles conflictos, recordatorios pendientes, precios, honorarios medicos y reportes por entregar. " +
+        `Citas visibles:\n${agendaSummary || "Sin citas registradas."}\n` +
+        "Devuelve conflictos, acciones del Call Center, recordatorios sugeridos y alertas de aprobacion medica antes de enviar documentos."
+    });
   }
 
   async function preparePatientReminders(patient: PatientRecord) {
@@ -651,7 +853,20 @@ export default function Home() {
               />
             ) : null}
             {activeModule === "agenda" ? (
-              <AgendaModule schedules={clinicSchedules} automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
+              <AgendaModule
+                schedules={clinicSchedules}
+                appointments={clinicAppointments}
+                patients={clinicPatients}
+                staff={clinicStaff}
+                services={clinicServices}
+                clinicId={clinicId}
+                automations={clinicAutomations}
+                onRunAutomation={runAutomation}
+                onSaveAppointment={saveAppointment}
+                onPrepareAppointmentReminders={prepareAppointmentReminders}
+                onPrepareAgendaReview={prepareAgendaReview}
+                busy={busy}
+              />
             ) : null}
             {activeModule === "pacientes" ? (
               <PatientsModule
@@ -794,54 +1009,483 @@ function DashboardModule({
 
 function AgendaModule({
   schedules,
+  appointments,
+  patients,
+  staff,
+  services,
+  clinicId,
   automations,
   onRunAutomation,
+  onSaveAppointment,
+  onPrepareAppointmentReminders,
+  onPrepareAgendaReview,
   busy
 }: {
   schedules: DoctorSchedule[];
+  appointments: AppointmentRecord[];
+  patients: PatientRecord[];
+  staff: StaffMember[];
+  services: ServiceCatalogItem[];
+  clinicId: string;
   automations: AutomationTemplate[];
   onRunAutomation: (template: AutomationTemplate) => void;
+  onSaveAppointment: (appointment: AppointmentRecord) => Promise<AppointmentRecord | undefined>;
+  onPrepareAppointmentReminders: (appointment: AppointmentRecord) => void;
+  onPrepareAgendaReview: () => void;
   busy: boolean;
 }) {
   const agendaAutomation = automations.find((item) => item.intent === "agenda");
+  const doctors = staff.filter((member) => member.role === "medico");
+  const [selectedDate, setSelectedDate] = useState(dateKey(appointments[0]?.startsAt ?? defaultAppointmentStart()));
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState(appointments[0]?.id ?? "");
+  const selectedAppointment = appointments.find((appointment) => appointment.id === selectedAppointmentId);
+  const [draft, setDraft] = useState<AppointmentRecord>(() =>
+    selectedAppointment ? cloneAppointment(selectedAppointment) : createEmptyAppointment(clinicId, patients, staff, services)
+  );
+
+  const weekDays = useMemo(() => {
+    const base = new Date(`${selectedDate}T00:00`);
+    if (Number.isNaN(base.getTime())) return [];
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(base);
+      date.setDate(base.getDate() + index);
+      const key = dateKey(toLocalDateTimeInput(date));
+      return {
+        key,
+        label: readableDate(`${key}T12:00`),
+        appointments: appointments
+          .filter((appointment) => dateKey(appointment.startsAt) === key)
+          .sort((left, right) => left.startsAt.localeCompare(right.startsAt))
+      };
+    });
+  }, [appointments, selectedDate]);
+
+  const selectedAppointments = useMemo(
+    () =>
+      appointments
+        .filter((appointment) => dateKey(appointment.startsAt) === selectedDate)
+        .sort((left, right) => left.startsAt.localeCompare(right.startsAt)),
+    [appointments, selectedDate]
+  );
+
+  const agendaTotals = useMemo(() => {
+    return selectedAppointments.reduce(
+      (totals, appointment) => ({
+        revenue: totals.revenue + appointment.price,
+        honorarium: totals.honorarium + appointment.doctorHonorarium,
+        reminders: totals.reminders + (appointment.reminderStatus === "pendiente" ? 1 : 0),
+        reports: totals.reports + (appointment.reportDeliveryStatus !== "enviado" ? 1 : 0)
+      }),
+      { revenue: 0, honorarium: 0, reminders: 0, reports: 0 }
+    );
+  }, [selectedAppointments]);
+
+  useEffect(() => {
+    if (mode === "existing" && (!selectedAppointmentId || !appointments.some((appointment) => appointment.id === selectedAppointmentId))) {
+      setSelectedAppointmentId(appointments[0]?.id ?? "");
+    }
+  }, [appointments, mode, selectedAppointmentId]);
+
+  useEffect(() => {
+    if (mode === "new") {
+      setDraft(createEmptyAppointment(clinicId, patients, staff, services));
+      return;
+    }
+
+    setDraft(selectedAppointment ? cloneAppointment(selectedAppointment) : createEmptyAppointment(clinicId, patients, staff, services));
+  }, [clinicId, mode, patients, selectedAppointment, services, staff]);
+
+  function updateDraft<Key extends keyof AppointmentRecord>(field: Key, value: AppointmentRecord[Key]) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function setPatient(patientId: string) {
+    const patient = patients.find((item) => item.id === patientId);
+    setDraft((current) => ({
+      ...current,
+      patientId,
+      patientName: patient?.name ?? current.patientName,
+      reminderChannels: [
+        ...(patient?.communication.email ? ["email" as const] : []),
+        ...(patient?.communication.whatsapp ? ["whatsapp" as const] : [])
+      ]
+    }));
+  }
+
+  function setDoctor(doctorId: string) {
+    const doctor = doctors.find((item) => item.id === doctorId) ?? staff.find((item) => item.id === doctorId);
+    setDraft((current) => ({
+      ...current,
+      doctorId,
+      doctorName: doctor?.name ?? current.doctorName
+    }));
+  }
+
+  function setService(serviceId: string) {
+    const service = services.find((item) => item.id === serviceId);
+    setDraft((current) => ({
+      ...current,
+      serviceId,
+      serviceName: service?.name ?? current.serviceName,
+      endsAt: addMinutesToInput(current.startsAt, service?.durationMinutes ?? 30),
+      price: service?.price ?? current.price,
+      currency: service?.currency ?? current.currency,
+      doctorHonorarium: service?.doctorHonorarium ?? current.doctorHonorarium,
+      reportDeliveryStatus: service?.requiresReportApproval ? "aprobacion-medica" : current.reportDeliveryStatus,
+      notes: current.notes || service?.preparationInstructions || ""
+    }));
+  }
+
+  function setStart(value: string) {
+    const service = services.find((item) => item.id === draft.serviceId);
+    setDraft((current) => ({
+      ...current,
+      startsAt: value,
+      endsAt: addMinutesToInput(value, service?.durationMinutes ?? 30)
+    }));
+  }
+
+  function startNewAppointment() {
+    setMode("new");
+    setSelectedAppointmentId("");
+    setDraft(createEmptyAppointment(clinicId, patients, staff, services));
+  }
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = await onSaveAppointment({
+      ...draft,
+      clinicId,
+      patientName: patients.find((patient) => patient.id === draft.patientId)?.name ?? draft.patientName,
+      doctorName: doctors.find((doctor) => doctor.id === draft.doctorId)?.name ?? draft.doctorName,
+      serviceName: services.find((service) => service.id === draft.serviceId)?.name ?? draft.serviceName
+    });
+
+    if (saved) {
+      setMode("existing");
+      setSelectedAppointmentId(saved.id);
+      setSelectedDate(dateKey(saved.startsAt));
+    }
+  }
 
   return (
     <div className="grid">
-      <Panel icon={CalendarCheck} title="Agenda medica">
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Medico</th>
-                <th>Dia</th>
-                <th>Horario</th>
-                <th>Citas</th>
-                <th>Horas</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {schedules.map((schedule) => (
-                <tr key={schedule.id}>
-                  <td>
-                    <strong>{schedule.doctorName}</strong>
-                    <span>{schedule.specialty}</span>
-                  </td>
-                  <td>{schedule.day}</td>
-                  <td>
-                    {schedule.startsAt} - {schedule.endsAt}
-                  </td>
-                  <td>{schedule.appointments}</td>
-                  <td>{schedule.verifiedHours}</td>
-                  <td>
-                    <span className={`status-chip ${schedule.status}`}>{schedule.status}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <Panel icon={CalendarCheck} title="Agenda Call Center">
+        <div className="agenda-module">
+          <div className="agenda-toolbar">
+            <div className="field agenda-date-field">
+              <label htmlFor="agenda-date">Fecha</label>
+              <input id="agenda-date" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+            </div>
+            <div className="row-metrics">
+              <span>{selectedAppointments.length} citas</span>
+              <span>{money(agendaTotals.revenue, "USD")} agenda</span>
+              <span>{money(agendaTotals.honorarium, "USD")} honorarios</span>
+            </div>
+            <div className="button-row">
+              <button className="btn" type="button" onClick={onPrepareAgendaReview} disabled={busy} title="Revisar agenda con OpenClaw">
+                <Bot size={18} />
+                Revisar
+              </button>
+              <button className="btn primary" type="button" onClick={startNewAppointment} title="Nueva cita">
+                <Plus size={18} />
+                Nueva cita
+              </button>
+            </div>
+          </div>
+
+          <div className="agenda-calendar">
+            {weekDays.map((day) => (
+              <button
+                className={`agenda-day ${day.key === selectedDate ? "active" : ""}`}
+                type="button"
+                key={day.key}
+                onClick={() => setSelectedDate(day.key)}
+              >
+                <strong>{day.label}</strong>
+                <span>{day.appointments.length} citas</span>
+                <div className="agenda-day-slots">
+                  {day.appointments.slice(0, 3).map((appointment) => (
+                    <span key={appointment.id}>
+                      {readableTime(appointment.startsAt)} {appointment.doctorName}
+                    </span>
+                  ))}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="agenda-workspace">
+            <section className="agenda-timeline">
+              <div className="section-title-row">
+                <h3>Citas del dia</h3>
+                <span className="status-chip">{agendaTotals.reminders} recordatorios</span>
+              </div>
+              <div className="surface-list">
+                {selectedAppointments.map((appointment) => (
+                  <button
+                    className={`appointment-card ${appointment.id === selectedAppointmentId && mode === "existing" ? "active" : ""}`}
+                    type="button"
+                    key={appointment.id}
+                    onClick={() => {
+                      setMode("existing");
+                      setSelectedAppointmentId(appointment.id);
+                    }}
+                  >
+                    <div className="appointment-time">
+                      <strong>{readableTime(appointment.startsAt)}</strong>
+                      <span>{readableTime(appointment.endsAt)}</span>
+                    </div>
+                    <div>
+                      <strong>{appointment.patientName}</strong>
+                      <p>
+                        {appointment.doctorName} - {appointment.serviceName}
+                      </p>
+                      <div className="tag-row">
+                        <span className={`status-chip ${appointment.status}`}>{appointmentStatusLabels[appointment.status]}</span>
+                        <span className={`status-chip ${appointment.reminderStatus}`}>{reminderStatusLabels[appointment.reminderStatus]}</span>
+                        <span className="tag">{money(appointment.price, appointment.currency)}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                {selectedAppointments.length === 0 ? <div className="empty-state">Sin citas para esta fecha.</div> : null}
+              </div>
+            </section>
+
+            <form className="agenda-editor" onSubmit={handleSave}>
+              <div className="patient-editor-header">
+                <div>
+                  <h3>{draft.id ? "Actualizar cita" : "Nueva cita"}</h3>
+                  <p>
+                    {draft.patientName || "Paciente pendiente"} - {draft.serviceName || "Servicio pendiente"}
+                  </p>
+                </div>
+                <div className="button-row">
+                  {draft.id ? (
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => onPrepareAppointmentReminders(draft)}
+                      disabled={busy}
+                      title="Preparar recordatorio"
+                    >
+                      <Send size={18} />
+                      Recordatorio
+                    </button>
+                  ) : null}
+                  <button className="btn primary" type="submit" disabled={busy} title="Guardar cita">
+                    <Save size={18} />
+                    Guardar cita
+                  </button>
+                </div>
+              </div>
+
+              <div className="appointment-form-grid">
+                <div className="field">
+                  <label htmlFor="appointment-patient">Paciente</label>
+                  <select id="appointment-patient" value={draft.patientId} onChange={(event) => setPatient(event.target.value)} required>
+                    <option value="">Seleccionar paciente</option>
+                    {patients.map((patient) => (
+                      <option value={patient.id} key={patient.id}>
+                        {patient.name} - {patient.documentId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-doctor">Medico</label>
+                  <select id="appointment-doctor" value={draft.doctorId} onChange={(event) => setDoctor(event.target.value)} required>
+                    <option value="">Seleccionar medico</option>
+                    {doctors.map((doctor) => (
+                      <option value={doctor.id} key={doctor.id}>
+                        {doctor.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-service">Servicio</label>
+                  <select id="appointment-service" value={draft.serviceId} onChange={(event) => setService(event.target.value)} required>
+                    <option value="">Seleccionar servicio</option>
+                    {services.map((service) => (
+                      <option value={service.id} key={service.id}>
+                        {service.name} - {money(service.price, service.currency)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-start">Inicio</label>
+                  <input id="appointment-start" type="datetime-local" value={draft.startsAt} onChange={(event) => setStart(event.target.value)} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-end">Fin</label>
+                  <input id="appointment-end" type="datetime-local" value={draft.endsAt} onChange={(event) => updateDraft("endsAt", event.target.value)} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-status">Estado cita</label>
+                  <select
+                    id="appointment-status"
+                    value={draft.status}
+                    onChange={(event) => updateDraft("status", event.target.value as AppointmentRecord["status"])}
+                  >
+                    {Object.entries(appointmentStatusLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-payment">Pago</label>
+                  <select
+                    id="appointment-payment"
+                    value={draft.paymentStatus}
+                    onChange={(event) => updateDraft("paymentStatus", event.target.value as AppointmentRecord["paymentStatus"])}
+                  >
+                    {Object.entries(paymentStatusLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-report">Reporte</label>
+                  <select
+                    id="appointment-report"
+                    value={draft.reportDeliveryStatus}
+                    onChange={(event) => updateDraft("reportDeliveryStatus", event.target.value as AppointmentRecord["reportDeliveryStatus"])}
+                  >
+                    {Object.entries(reportDeliveryStatusLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-price">Precio</label>
+                  <input
+                    id="appointment-price"
+                    type="number"
+                    min="0"
+                    value={draft.price}
+                    onChange={(event) => updateDraft("price", Number(event.target.value))}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-honorarium">Honorario medico</label>
+                  <input
+                    id="appointment-honorarium"
+                    type="number"
+                    min="0"
+                    value={draft.doctorHonorarium}
+                    onChange={(event) => updateDraft("doctorHonorarium", Number(event.target.value))}
+                  />
+                </div>
+              </div>
+
+              <div className="checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.reminderChannels.includes("email")}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        reminderChannels: toggleChannel(current.reminderChannels, "email", event.target.checked)
+                      }))
+                    }
+                  />
+                  <Mail size={16} />
+                  Email
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.reminderChannels.includes("whatsapp")}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        reminderChannels: toggleChannel(current.reminderChannels, "whatsapp", event.target.checked)
+                      }))
+                    }
+                  />
+                  <MessageCircle size={16} />
+                  WhatsApp
+                </label>
+                <span className={`status-chip ${draft.reminderStatus}`}>{reminderStatusLabels[draft.reminderStatus]}</span>
+              </div>
+
+              <div className="field">
+                <label htmlFor="appointment-notes">Notas y preparacion</label>
+                <textarea id="appointment-notes" value={draft.notes} onChange={(event) => updateDraft("notes", event.target.value)} />
+              </div>
+            </form>
+          </div>
         </div>
       </Panel>
+
+      <div className="agenda-support-grid">
+        <Panel icon={Clock3} title="Disponibilidad medica">
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Medico</th>
+                  <th>Dia</th>
+                  <th>Horario</th>
+                  <th>Citas</th>
+                  <th>Horas</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedules.map((schedule) => (
+                  <tr key={schedule.id}>
+                    <td>
+                      <strong>{schedule.doctorName}</strong>
+                      <span>{schedule.specialty}</span>
+                    </td>
+                    <td>{schedule.day}</td>
+                    <td>
+                      {schedule.startsAt} - {schedule.endsAt}
+                    </td>
+                    <td>{schedule.appointments}</td>
+                    <td>{schedule.verifiedHours}</td>
+                    <td>
+                      <span className={`status-chip ${schedule.status}`}>{schedule.status}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+
+        <Panel icon={BadgeDollarSign} title="Servicios y honorarios">
+          <div className="surface-list">
+            {services.map((service) => (
+              <div className="surface-row" key={service.id}>
+                <div>
+                  <strong>{service.name}</strong>
+                  <p>
+                    {service.specialty} - {service.durationMinutes} min
+                  </p>
+                </div>
+                <div className="row-metrics">
+                  <span>{money(service.price, service.currency)}</span>
+                  <span>{money(service.doctorHonorarium, service.currency)} medico</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
 
       {agendaAutomation ? (
         <Panel icon={RefreshCw} title="Auditoria de agenda">

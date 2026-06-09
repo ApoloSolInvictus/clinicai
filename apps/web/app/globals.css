@@ -492,6 +492,11 @@ h1 {
 .status-chip.verificado,
 .status-chip.listo-contador,
 .status-chip.listo,
+.status-chip.confirmada,
+.status-chip.completada,
+.status-chip.pagado,
+.status-chip.facturado,
+.status-chip.programado,
 .status-chip.priority-normal {
   border-color: rgba(21, 128, 61, 0.22);
   color: var(--green);
@@ -505,6 +510,9 @@ h1 {
 .status-chip.pendiente-aprobacion,
 .status-chip.aprobacion-medica,
 .status-chip.borrador,
+.status-chip.solicitada,
+.status-chip.en-consulta,
+.status-chip.listo-envio,
 .status-chip.priority-alta {
   border-color: rgba(217, 119, 6, 0.25);
   color: var(--amber);
@@ -514,6 +522,8 @@ h1 {
 .status-chip.conflicto,
 .status-chip.suspendido,
 .status-chip.priority-critica,
+.status-chip.cancelada,
+.status-chip.fallo,
 .status-chip.riesgo-alto {
   border-color: rgba(225, 29, 72, 0.25);
   color: var(--rose);
@@ -547,6 +557,153 @@ h1 {
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.agenda-module {
+  display: grid;
+  gap: 14px;
+}
+
+.agenda-toolbar,
+.agenda-workspace,
+.agenda-support-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.agenda-toolbar {
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.agenda-date-field {
+  min-width: 0;
+}
+
+.agenda-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.agenda-day {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 132px;
+  min-width: 130px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.agenda-day.active {
+  border-color: rgba(13, 148, 136, 0.36);
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.agenda-day strong {
+  font-size: 13px;
+}
+
+.agenda-day > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.agenda-day-slots {
+  display: grid;
+  gap: 4px;
+}
+
+.agenda-day-slots span {
+  overflow: hidden;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda-workspace {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+}
+
+.agenda-timeline,
+.agenda-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.appointment-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.appointment-card.active {
+  border-color: rgba(79, 70, 229, 0.28);
+  background: rgba(79, 70, 229, 0.07);
+}
+
+.appointment-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.appointment-card p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.appointment-time {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 2px;
+  color: var(--teal-dark);
+}
+
+.appointment-time strong {
+  font-size: 16px;
+}
+
+.appointment-time span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.appointment-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agenda-support-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+  align-items: start;
 }
 
 .patient-row,
@@ -1076,6 +1233,9 @@ h1 {
   .content-grid,
   .architecture-row,
   .workspace-grid,
+  .agenda-toolbar,
+  .agenda-workspace,
+  .agenda-support-grid,
   .patient-workspace,
   .patient-form-grid-compact,
   .cash-grid,
@@ -1105,6 +1265,7 @@ h1 {
   .metrics-five,
   .modules,
   .field-grid,
+  .appointment-form-grid,
   .patient-form-grid,
   .patient-form-grid-compact,
   .cash-grid,
@@ -1113,6 +1274,7 @@ h1 {
   }
 
   .surface-row,
+  .agenda-toolbar,
   .patient-toolbar,
   .patient-editor-header,
   .section-title-row,
@@ -1125,11 +1287,16 @@ h1 {
 
   .clinic-switcher,
   .status-pill,
+  .agenda-toolbar .btn,
   .patient-toolbar .btn,
   .patient-editor-header .btn,
   .inline-actions .btn,
   .btn {
     width: 100%;
+  }
+
+  .appointment-card {
+    grid-template-columns: 1fr;
   }
 
   h1 {

@@ -60,6 +60,49 @@ export type DoctorSchedule = {
   status: "verificado" | "pendiente" | "conflicto";
 };
 
+export type AppointmentChannel = "email" | "whatsapp";
+
+export type ServiceCatalogItem = {
+  id: string;
+  clinicId: string;
+  name: string;
+  specialty: string;
+  durationMinutes: number;
+  price: number;
+  currency: string;
+  doctorHonorarium: number;
+  preparationInstructions: string;
+  requiresReportApproval: boolean;
+};
+
+export type AppointmentRecord = {
+  id: string;
+  clinicId: string;
+  patientId: string;
+  patientName: string;
+  doctorId: string;
+  doctorName: string;
+  serviceId: string;
+  serviceName: string;
+  startsAt: string;
+  endsAt: string;
+  price: number;
+  currency: string;
+  doctorHonorarium: number;
+  status: "solicitada" | "confirmada" | "en-consulta" | "completada" | "cancelada";
+  paymentStatus: "pendiente" | "pagado" | "facturado";
+  reminderChannels: AppointmentChannel[];
+  reminderStatus: "pendiente" | "programado" | "enviado" | "fallo";
+  reportDeliveryStatus: "pendiente" | "aprobacion-medica" | "listo-envio" | "enviado";
+  createdBy: string;
+  notes: string;
+  updatedAt: string;
+};
+
+export type AppointmentUpsertInput = Omit<AppointmentRecord, "id" | "updatedAt"> & {
+  id?: string;
+};
+
 export type PatientCommunicationPreference = {
   email: boolean;
   whatsapp: boolean;
@@ -168,6 +211,8 @@ export type CentralState = {
   roles: RoleDefinition[];
   staff: StaffMember[];
   schedules: DoctorSchedule[];
+  serviceCatalog: ServiceCatalogItem[];
+  appointments: AppointmentRecord[];
   patients: PatientRecord[];
   cashRegisters: CashRegister[];
   reports: ReportSummary[];
@@ -334,6 +379,127 @@ const initialState: CentralState = {
       verifiedHours: 5,
       appointments: 6,
       status: "conflicto"
+    }
+  ],
+  serviceCatalog: [
+    {
+      id: "svc-consulta-general",
+      clinicId: defaultClinicId,
+      name: "Consulta general",
+      specialty: "Medicina general",
+      durationMinutes: 30,
+      price: 75,
+      currency: "USD",
+      doctorHonorarium: 45,
+      preparationInstructions: "Llegar 15 minutos antes con documento de identidad y lista de medicamentos activos.",
+      requiresReportApproval: true
+    },
+    {
+      id: "svc-control-cardiologia",
+      clinicId: defaultClinicId,
+      name: "Control cardiologia",
+      specialty: "Cardiologia",
+      durationMinutes: 45,
+      price: 110,
+      currency: "USD",
+      doctorHonorarium: 65,
+      preparationInstructions: "Traer examenes previos y evitar cafeina 4 horas antes si se solicitara electrocardiograma.",
+      requiresReportApproval: true
+    },
+    {
+      id: "svc-laboratorio-control",
+      clinicId: defaultClinicId,
+      name: "Laboratorio y control",
+      specialty: "Laboratorio",
+      durationMinutes: 45,
+      price: 95,
+      currency: "USD",
+      doctorHonorarium: 50,
+      preparationInstructions: "Ayuno de 8 horas cuando aplique. Confirmar medicamentos activos antes de enviar instrucciones.",
+      requiresReportApproval: true
+    },
+    {
+      id: "svc-seguimiento-respiratorio",
+      clinicId: defaultClinicId,
+      name: "Seguimiento respiratorio",
+      specialty: "Medicina general",
+      durationMinutes: 45,
+      price: 90,
+      currency: "USD",
+      doctorHonorarium: 55,
+      preparationInstructions: "Traer inhaladores actuales y anotar sintomas de los ultimos 7 dias.",
+      requiresReportApproval: true
+    }
+  ],
+  appointments: [
+    {
+      id: "appt-100",
+      clinicId: defaultClinicId,
+      patientId: "pat-100",
+      patientName: "Maria Fernanda Rojas",
+      doctorId: "staff-1",
+      doctorName: "Dra. Elena Vargas",
+      serviceId: "svc-consulta-general",
+      serviceName: "Consulta general",
+      startsAt: "2026-06-10T09:30",
+      endsAt: "2026-06-10T10:00",
+      price: 75,
+      currency: "USD",
+      doctorHonorarium: 45,
+      status: "confirmada",
+      paymentStatus: "pendiente",
+      reminderChannels: ["email", "whatsapp"],
+      reminderStatus: "programado",
+      reportDeliveryStatus: "aprobacion-medica",
+      createdBy: "Call Center",
+      notes: "Confirmar asistencia y preparar reporte medico posterior.",
+      updatedAt: now
+    },
+    {
+      id: "appt-101",
+      clinicId: defaultClinicId,
+      patientId: "pat-101",
+      patientName: "Jorge Alberto Mendez",
+      doctorId: "staff-2",
+      doctorName: "Dr. Marco Solis",
+      serviceId: "svc-laboratorio-control",
+      serviceName: "Laboratorio y control",
+      startsAt: "2026-06-11T11:00",
+      endsAt: "2026-06-11T11:45",
+      price: 95,
+      currency: "USD",
+      doctorHonorarium: 50,
+      status: "confirmada",
+      paymentStatus: "pendiente",
+      reminderChannels: ["email", "whatsapp"],
+      reminderStatus: "pendiente",
+      reportDeliveryStatus: "aprobacion-medica",
+      createdBy: "Call Center",
+      notes: "Enviar preparacion de laboratorio tras aprobacion medica.",
+      updatedAt: now
+    },
+    {
+      id: "appt-102",
+      clinicId: defaultClinicId,
+      patientId: "pat-102",
+      patientName: "Sofia Camila Alvarez",
+      doctorId: "staff-1",
+      doctorName: "Dra. Elena Vargas",
+      serviceId: "svc-seguimiento-respiratorio",
+      serviceName: "Seguimiento respiratorio",
+      startsAt: "2026-06-14T15:00",
+      endsAt: "2026-06-14T15:45",
+      price: 90,
+      currency: "USD",
+      doctorHonorarium: 55,
+      status: "solicitada",
+      paymentStatus: "pendiente",
+      reminderChannels: ["email"],
+      reminderStatus: "pendiente",
+      reportDeliveryStatus: "pendiente",
+      createdBy: "Call Center",
+      notes: "Validar sintomas recientes antes de finalizar reporte.",
+      updatedAt: now
     }
   ],
   patients: [
@@ -630,6 +796,32 @@ function makeId(prefix: string) {
 type LegacyPatientRecord = Partial<PatientRecord> &
   Pick<PatientRecord, "id" | "clinicId" | "name" | "documentId">;
 
+type LegacyAppointmentRecord = Partial<AppointmentRecord> &
+  Pick<
+    AppointmentRecord,
+    "id" | "clinicId" | "patientId" | "patientName" | "doctorId" | "doctorName" | "serviceId" | "serviceName" | "startsAt"
+  >;
+
+type RecoverableCentralState = Omit<CentralState, "serviceCatalog" | "appointments"> &
+  Partial<Pick<CentralState, "serviceCatalog" | "appointments">>;
+
+function localDateTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function addMinutes(value: string, minutes: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  date.setMinutes(date.getMinutes() + minutes);
+  return localDateTime(date);
+}
+
+function appointmentTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function normalizePatient(patient: LegacyPatientRecord): PatientRecord {
   const pendingDocuments = patient.pendingDocuments ?? [];
   const reports = patient.reports ?? pendingDocuments.map((documentName, index) => ({
@@ -672,9 +864,56 @@ function normalizePatient(patient: LegacyPatientRecord): PatientRecord {
   };
 }
 
-function ensureStateShape(state: CentralState) {
+function normalizeAppointment(appointment: LegacyAppointmentRecord): AppointmentRecord {
+  const service = initialState.serviceCatalog.find((item) => item.id === appointment.serviceId);
+  const startsAt = appointment.startsAt;
+  const duration = service?.durationMinutes ?? 30;
+
+  return {
+    id: appointment.id,
+    clinicId: appointment.clinicId,
+    patientId: appointment.patientId,
+    patientName: appointment.patientName,
+    doctorId: appointment.doctorId,
+    doctorName: appointment.doctorName,
+    serviceId: appointment.serviceId,
+    serviceName: appointment.serviceName,
+    startsAt,
+    endsAt: appointment.endsAt ?? addMinutes(startsAt, duration),
+    price: appointment.price ?? service?.price ?? 0,
+    currency: appointment.currency ?? service?.currency ?? "USD",
+    doctorHonorarium: appointment.doctorHonorarium ?? service?.doctorHonorarium ?? 0,
+    status: appointment.status ?? "solicitada",
+    paymentStatus: appointment.paymentStatus ?? "pendiente",
+    reminderChannels: appointment.reminderChannels ?? ["email", "whatsapp"],
+    reminderStatus: appointment.reminderStatus ?? "pendiente",
+    reportDeliveryStatus: appointment.reportDeliveryStatus ?? "pendiente",
+    createdBy: appointment.createdBy ?? "Call Center",
+    notes: appointment.notes ?? "",
+    updatedAt: appointment.updatedAt ?? now
+  };
+}
+
+function findAppointmentConflicts(state: CentralState, appointment: AppointmentRecord) {
+  const startsAt = appointmentTime(appointment.startsAt);
+  const endsAt = appointmentTime(appointment.endsAt);
+  if (!startsAt || !endsAt) return [];
+
+  return state.appointments.filter((candidate) => {
+    if (candidate.id === appointment.id || candidate.clinicId !== appointment.clinicId) return false;
+    if (candidate.doctorId !== appointment.doctorId || candidate.status === "cancelada") return false;
+    const candidateStartsAt = appointmentTime(candidate.startsAt);
+    const candidateEndsAt = appointmentTime(candidate.endsAt);
+    return startsAt < candidateEndsAt && endsAt > candidateStartsAt;
+  });
+}
+
+function ensureStateShape(state: RecoverableCentralState): CentralState {
+  state.serviceCatalog ??= structuredClone(initialState.serviceCatalog);
+  state.appointments ??= structuredClone(initialState.appointments);
   state.patients = state.patients.map((patient) => normalizePatient(patient));
-  return state;
+  state.appointments = state.appointments.map((appointment) => normalizeAppointment(appointment));
+  return state as CentralState;
 }
 
 export function getState() {
@@ -697,6 +936,8 @@ export function getStateForAccess(access: { allClinics: boolean; clinicIds: stri
     roles: state.roles,
     staff: state.staff.filter((item) => allowed.has(item.clinicId)),
     schedules: state.schedules.filter((item) => allowed.has(item.clinicId)),
+    serviceCatalog: state.serviceCatalog.filter((item) => allowed.has(item.clinicId)),
+    appointments: state.appointments.filter((item) => allowed.has(item.clinicId)),
     patients: state.patients.filter((item) => allowed.has(item.clinicId)),
     cashRegisters: state.cashRegisters.filter((item) => allowed.has(item.clinicId)),
     reports: state.reports.filter((item) => allowed.has(item.clinicId)),
@@ -750,6 +991,52 @@ export function upsertPatient(input: PatientUpsertInput) {
   });
 
   return normalized;
+}
+
+export function upsertAppointment(input: AppointmentUpsertInput) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const service = state.serviceCatalog.find((item) => item.id === input.serviceId);
+  const patient = state.patients.find((item) => item.id === input.patientId);
+  const normalized = normalizeAppointment({
+    ...input,
+    id: input.id ?? makeId("appt"),
+    patientName: patient?.name ?? input.patientName,
+    serviceName: service?.name ?? input.serviceName,
+    price: input.price ?? service?.price ?? 0,
+    currency: input.currency || service?.currency || "USD",
+    doctorHonorarium: input.doctorHonorarium ?? service?.doctorHonorarium ?? 0,
+    endsAt: input.endsAt || addMinutes(input.startsAt, service?.durationMinutes ?? 30),
+    updatedAt: timestamp
+  });
+  const index = state.appointments.findIndex((appointment) => appointment.id === normalized.id);
+  const conflicts = findAppointmentConflicts(state, normalized);
+
+  if (index >= 0) {
+    state.appointments[index] = normalized;
+  } else {
+    state.appointments.unshift(normalized);
+  }
+
+  if (patient) {
+    patient.nextAppointment = normalized.startsAt.replace("T", " ");
+    patient.nextService = normalized.serviceName;
+    patient.assignedDoctor = normalized.doctorName;
+    patient.updatedAt = timestamp;
+  }
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: normalized.clinicId,
+    type: conflicts.length > 0 ? "appointment.conflict.detected" : index >= 0 ? "appointment.updated" : "appointment.created",
+    message:
+      conflicts.length > 0
+        ? `${normalized.doctorName} tiene conflicto de agenda para ${normalized.startsAt}.`
+        : `${normalized.patientName} ${index >= 0 ? "actualizado" : "agendado"} para ${normalized.serviceName}.`,
+    at: timestamp
+  });
+
+  return { appointment: normalized, conflicts };
 }
 
 export function patchTask(taskId: string, patch: Partial<AutomationTask>) {
