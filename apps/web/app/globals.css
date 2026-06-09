@@ -1,17 +1,19 @@
 :root {
-  --bg: #f7faf9;
-  --panel: #ffffff;
-  --panel-strong: #f0f7f6;
-  --ink: #10201f;
-  --muted: #61716f;
-  --line: #dbe7e4;
-  --teal: #0d9488;
-  --teal-dark: #0f766e;
-  --indigo: #4f46e5;
-  --amber: #d97706;
-  --rose: #e11d48;
-  --green: #15803d;
-  --shadow: 0 18px 50px rgba(18, 38, 35, 0.08);
+  --bg: #020713;
+  --panel: rgba(8, 19, 39, 0.88);
+  --panel-strong: rgba(12, 31, 61, 0.72);
+  --panel-soft: rgba(5, 13, 29, 0.72);
+  --ink: #f5f9ff;
+  --muted: #a8bbcf;
+  --line: rgba(135, 190, 255, 0.18);
+  --teal: #0ea5e9;
+  --teal-dark: #7dd3fc;
+  --indigo: #2563eb;
+  --amber: #fbbf24;
+  --rose: #ff3d5a;
+  --green: #22c55e;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+  --glow-blue: 0 0 0 1px rgba(125, 211, 252, 0.08), 0 24px 80px rgba(14, 165, 233, 0.08);
 }
 
 * {
@@ -21,6 +23,7 @@
 html {
   min-width: 320px;
   background: var(--bg);
+  color-scheme: dark;
 }
 
 body {
@@ -28,10 +31,14 @@ body {
   margin: 0;
   color: var(--ink);
   background:
-    linear-gradient(90deg, rgba(13, 148, 136, 0.08) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(79, 70, 229, 0.05) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(14, 165, 233, 0.22), transparent 36%),
+    linear-gradient(215deg, rgba(37, 99, 235, 0.18), transparent 42%),
+    linear-gradient(160deg, transparent 0%, rgba(255, 61, 90, 0.07) 48%, transparent 72%),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
     var(--bg);
-  background-size: 44px 44px;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat, repeat, no-repeat;
+  background-size: 100% 100%, 100% 100%, 100% 100%, 48px 48px, 48px 48px, auto;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -1336,12 +1343,410 @@ h1 {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #101918;
-  color: #d7fff6;
+  background: rgba(1, 8, 20, 0.92);
+  color: #d7ecff;
   font-family: "JetBrains Mono", "Cascadia Code", monospace;
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+.main {
+  background:
+    linear-gradient(180deg, rgba(7, 18, 38, 0.48), rgba(2, 7, 19, 0.18)),
+    transparent;
+}
+
+.sidebar {
+  background:
+    linear-gradient(180deg, rgba(6, 18, 39, 0.94), rgba(2, 8, 22, 0.92)),
+    rgba(2, 7, 19, 0.92);
+  box-shadow: 18px 0 70px rgba(0, 0, 0, 0.28);
+}
+
+.brand-mark {
+  background: linear-gradient(135deg, #0ea5e9, #1d4ed8 58%, #ff3d5a);
+  box-shadow: 0 18px 52px rgba(14, 165, 233, 0.24);
+}
+
+.brand-title {
+  color: #ffffff;
+}
+
+.brand-subtitle,
+.side-note,
+.nav-item,
+.status-pill,
+.metric-label,
+.surface-row p,
+.surface-block p,
+.architecture-card p,
+.module-card p,
+.data-table th,
+.data-table td span,
+.agenda-day > span,
+.appointment-card p,
+.appointment-time span,
+.doctor-list-item span,
+.report-list-item span,
+.service-check small,
+.report-reader-panel p,
+.patient-list-item span,
+.patient-editor-header p,
+.nested-row p,
+.contact-strip span,
+.empty-state,
+.row-metrics,
+.mini-stat,
+.field label,
+.activity p,
+.event-time,
+.sync-line,
+.muted-text {
+  color: var(--muted);
+}
+
+.eyebrow {
+  color: #8fd3ff;
+}
+
+h1,
+h2,
+h3,
+.panel-title,
+.metric-value,
+.surface-row strong,
+.surface-block strong,
+.architecture-card strong,
+.module-name,
+.doctor-list-item strong,
+.report-list-item strong,
+.patient-list-item strong,
+.reader-block strong,
+.nested-row strong,
+.mini-stat b,
+.sync-line strong {
+  color: var(--ink);
+}
+
+.nav-item {
+  color: #a8bbcf;
+}
+
+.nav-item:hover {
+  border-color: rgba(125, 211, 252, 0.2);
+  background: rgba(14, 165, 233, 0.08);
+  color: #e8f6ff;
+}
+
+.nav-item.active {
+  color: #ffffff;
+  border-color: rgba(125, 211, 252, 0.38);
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.22), rgba(37, 99, 235, 0.18));
+  box-shadow: inset 3px 0 0 #0ea5e9, 0 12px 34px rgba(14, 165, 233, 0.12);
+}
+
+.side-note,
+.side-status,
+.status-pill,
+.clinic-switcher,
+.card,
+.architecture-card,
+.module-card,
+.surface-row,
+.surface-block,
+.agenda-day,
+.appointment-card,
+.doctor-list-item,
+.report-list-item,
+.service-check,
+.schedule-editor-row,
+.report-reader-panel,
+.reader-block,
+.patient-list-item,
+.patient-editor-header,
+.form-section,
+.checkbox-row label,
+.nested-row,
+.icon-btn,
+.contact-strip span,
+.empty-state,
+.activity,
+.btn {
+  border-color: var(--line);
+  background:
+    linear-gradient(180deg, rgba(12, 31, 61, 0.76), rgba(5, 13, 29, 0.82)),
+    rgba(5, 13, 29, 0.78);
+  color: var(--ink);
+}
+
+.card,
+.architecture-card,
+.module-card,
+.surface-row,
+.surface-block,
+.agenda-day,
+.appointment-card,
+.doctor-list-item,
+.report-list-item,
+.report-reader-panel,
+.patient-list-item,
+.patient-editor-header,
+.form-section,
+.activity {
+  box-shadow: var(--glow-blue), var(--shadow);
+}
+
+.metric {
+  background:
+    linear-gradient(160deg, rgba(12, 31, 61, 0.88), rgba(4, 11, 26, 0.94)),
+    rgba(5, 13, 29, 0.86);
+}
+
+.panel-header {
+  background: rgba(3, 13, 31, 0.48);
+}
+
+.icon-tile {
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
+}
+
+.icon-teal {
+  background: linear-gradient(135deg, #0ea5e9, #0369a1);
+}
+
+.icon-indigo {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+}
+
+.icon-amber {
+  color: #111827;
+  background: linear-gradient(135deg, #fde68a, #f59e0b);
+}
+
+.icon-rose {
+  background: linear-gradient(135deg, #ff6b7c, #be123c);
+}
+
+.icon-green {
+  background: linear-gradient(135deg, #34d399, #15803d);
+}
+
+.tag {
+  border-color: rgba(125, 211, 252, 0.28);
+  color: #a7e6ff;
+  background: rgba(14, 165, 233, 0.11);
+}
+
+.status-pill,
+.clinic-switcher {
+  background: rgba(5, 13, 29, 0.78);
+  color: #dbeafe;
+}
+
+.status-dot {
+  background: var(--amber);
+  box-shadow: 0 0 18px rgba(251, 191, 36, 0.55);
+}
+
+.status-dot.online {
+  background: var(--green);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.5);
+}
+
+.data-table {
+  color: var(--ink);
+}
+
+.data-table tbody tr {
+  background: rgba(5, 13, 29, 0.38);
+}
+
+.data-table tbody tr:hover {
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.data-table th,
+.data-table td,
+.mini-stat,
+.sync-line {
+  border-bottom-color: var(--line);
+}
+
+.status-chip {
+  border-color: rgba(135, 190, 255, 0.2);
+  color: #cfe7ff;
+  background: rgba(7, 18, 38, 0.78);
+}
+
+.status-chip.online,
+.status-chip.activo,
+.status-chip.verificado,
+.status-chip.listo-contador,
+.status-chip.listo,
+.status-chip.confirmada,
+.status-chip.completada,
+.status-chip.completado,
+.status-chip.pagado,
+.status-chip.pagada,
+.status-chip.facturado,
+.status-chip.programado,
+.status-chip.registrado,
+.status-chip.priority-normal {
+  border-color: rgba(34, 197, 94, 0.34);
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.status-chip.pendiente,
+.status-chip.abierto,
+.status-chip.requiere-revision,
+.status-chip.requiere-aprobacion,
+.status-chip.pendiente-aprobacion,
+.status-chip.aprobacion-medica,
+.status-chip.borrador,
+.status-chip.solicitada,
+.status-chip.en-consulta,
+.status-chip.listo-envio,
+.status-chip.priority-alta {
+  border-color: rgba(251, 191, 36, 0.38);
+  color: #fde68a;
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.status-chip.conflicto,
+.status-chip.suspendido,
+.status-chip.priority-critica,
+.status-chip.cancelada,
+.status-chip.fallo,
+.status-chip.anulado,
+.status-chip.vencida,
+.status-chip.riesgo-alto {
+  border-color: rgba(255, 61, 90, 0.4);
+  color: #ff9aaa;
+  background: rgba(255, 61, 90, 0.1);
+}
+
+.status-chip.riesgo-bajo,
+.status-chip.aprobado,
+.status-chip.enviado {
+  border-color: rgba(125, 211, 252, 0.34);
+  color: #a7e6ff;
+  background: rgba(14, 165, 233, 0.11);
+}
+
+.status-chip.riesgo-medio {
+  border-color: rgba(96, 165, 250, 0.34);
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.approval-pill,
+.appointment-time {
+  color: #fde68a;
+}
+
+.agenda-day.active,
+.appointment-card.active,
+.doctor-list-item.active,
+.report-list-item.active,
+.patient-list-item.active {
+  border-color: rgba(125, 211, 252, 0.48);
+  background:
+    linear-gradient(160deg, rgba(14, 165, 233, 0.2), rgba(37, 99, 235, 0.12)),
+    rgba(5, 13, 29, 0.88);
+}
+
+.agenda-day-slots span {
+  background: rgba(1, 8, 20, 0.64);
+  color: #c8ddf1;
+}
+
+.field select,
+.field input,
+.field textarea {
+  border-color: rgba(135, 190, 255, 0.2);
+  background: rgba(1, 8, 20, 0.72);
+  color: var(--ink);
+}
+
+.field select option {
+  background: #061226;
+  color: var(--ink);
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: #6f849d;
+}
+
+.field select:focus,
+.field input:focus,
+.field textarea:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18);
+}
+
+.checkbox-row input,
+.service-check input {
+  accent-color: #0ea5e9;
+}
+
+.btn {
+  background: rgba(7, 18, 38, 0.78);
+  color: #eaf6ff;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: rgba(125, 211, 252, 0.38);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.btn.primary {
+  border-color: #0ea5e9;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0ea5e9, #1d4ed8);
+  box-shadow: 0 16px 42px rgba(14, 165, 233, 0.22);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+}
+
+.icon-btn {
+  color: #c8ddf1;
+}
+
+.icon-btn:hover {
+  color: #ffffff;
+  border-color: rgba(125, 211, 252, 0.38);
+}
+
+.icon-btn.danger {
+  color: #ff9aaa;
+}
+
+.activity-top,
+.profile-pill {
+  color: #eaf6ff;
+}
+
+.result-box::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.result-box::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: rgba(2, 7, 19, 0.72);
+}
+
+.result-box::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(2, 7, 19, 0.72);
+  border-radius: 999px;
+  background: rgba(125, 211, 252, 0.34);
 }
 
 .auth-shell {
@@ -1507,8 +1912,8 @@ h1 {
   padding: 10px 12px;
   border: 1px solid rgba(225, 29, 72, 0.28);
   border-radius: 8px;
-  color: #9f1239;
-  background: rgba(225, 29, 72, 0.08);
+  color: #fecdd3;
+  background: rgba(225, 29, 72, 0.14);
   font-size: 13px;
 }
 

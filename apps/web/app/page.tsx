@@ -1025,12 +1025,12 @@ export default function Home() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark" title="Lux Aeterna">
+          <div className="brand-mark" title="OpenClinic">
             <Stethoscope size={24} />
           </div>
           <div>
-            <span className="brand-title">Lux Aeterna</span>
-            <span className="brand-subtitle">Clinical AI Codex</span>
+            <span className="brand-title">OpenClinic</span>
+            <span className="brand-subtitle">Clinical Command Center</span>
           </div>
         </div>
 
