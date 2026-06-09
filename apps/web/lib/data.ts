@@ -42,8 +42,23 @@ export type StaffMember = {
   name: string;
   role: string;
   email: string;
+  phone: string;
+  licenseNumber: string;
+  specialty: string;
   status: "activo" | "pendiente" | "suspendido";
   verifiedHoursMonth: number;
+  defaultHonorarium: number;
+  currency: string;
+  paymentMethod: string;
+  serviceIds: string[];
+  signatureLabel: string;
+  reportApprovalEnabled: boolean;
+  notes: string;
+  updatedAt: string;
+};
+
+export type StaffUpsertInput = Omit<StaffMember, "id" | "updatedAt"> & {
+  id?: string;
 };
 
 export type DoctorSchedule = {
@@ -58,6 +73,10 @@ export type DoctorSchedule = {
   verifiedHours: number;
   appointments: number;
   status: "verificado" | "pendiente" | "conflicto";
+};
+
+export type DoctorScheduleUpsertInput = Omit<DoctorSchedule, "id"> & {
+  id?: string;
 };
 
 export type AppointmentChannel = "email" | "whatsapp";
@@ -116,6 +135,11 @@ export type PatientReport = {
   doctorName: string;
   createdAt: string;
   approvedAt?: string;
+  summary: string;
+  prescription: string;
+  nextAppointment: string;
+  medicalImages: string[];
+  signedByDoctor: string;
   deliveryChannels: ("email" | "whatsapp")[];
 };
 
@@ -296,8 +320,19 @@ const initialState: CentralState = {
       name: "Dra. Elena Vargas",
       role: "medico",
       email: "elena.vargas@example.local",
+      phone: "+506 8888-2101",
+      licenseNumber: "MED-CR-10245",
+      specialty: "Medicina general",
       status: "activo",
-      verifiedHoursMonth: 128
+      verifiedHoursMonth: 128,
+      defaultHonorarium: 42,
+      currency: "USD",
+      paymentMethod: "Transferencia bancaria",
+      serviceIds: ["svc-consulta-general", "svc-seguimiento-respiratorio"],
+      signatureLabel: "Dra. Elena Vargas - MED-CR-10245",
+      reportApprovalEnabled: true,
+      notes: "Aprueba reportes medicos, seguimientos y recetarios de medicina general.",
+      updatedAt: now
     },
     {
       id: "staff-2",
@@ -305,8 +340,19 @@ const initialState: CentralState = {
       name: "Dr. Marco Solis",
       role: "medico",
       email: "marco.solis@example.local",
+      phone: "+506 8888-2202",
+      licenseNumber: "MED-CR-20412",
+      specialty: "Cardiologia",
       status: "activo",
-      verifiedHoursMonth: 96
+      verifiedHoursMonth: 96,
+      defaultHonorarium: 55,
+      currency: "USD",
+      paymentMethod: "Transferencia bancaria",
+      serviceIds: ["svc-control-cardiologia", "svc-laboratorio-control"],
+      signatureLabel: "Dr. Marco Solis - MED-CR-20412",
+      reportApprovalEnabled: true,
+      notes: "Aprueba controles cardiologicos, laboratorios y recetas de seguimiento.",
+      updatedAt: now
     },
     {
       id: "staff-3",
@@ -314,8 +360,19 @@ const initialState: CentralState = {
       name: "Ana Rojas",
       role: "cajera",
       email: "ana.rojas@example.local",
+      phone: "+506 8888-2303",
+      licenseNumber: "",
+      specialty: "Caja",
       status: "activo",
-      verifiedHoursMonth: 154
+      verifiedHoursMonth: 154,
+      defaultHonorarium: 0,
+      currency: "USD",
+      paymentMethod: "Planilla",
+      serviceIds: [],
+      signatureLabel: "",
+      reportApprovalEnabled: false,
+      notes: "Gestion de caja y cierres financieros.",
+      updatedAt: now
     },
     {
       id: "staff-4",
@@ -323,8 +380,19 @@ const initialState: CentralState = {
       name: "Laura Mendez",
       role: "recepcion",
       email: "laura.mendez@example.local",
+      phone: "+506 8888-2404",
+      licenseNumber: "",
+      specialty: "Recepcion",
       status: "activo",
-      verifiedHoursMonth: 160
+      verifiedHoursMonth: 160,
+      defaultHonorarium: 0,
+      currency: "USD",
+      paymentMethod: "Planilla",
+      serviceIds: [],
+      signatureLabel: "",
+      reportApprovalEnabled: false,
+      notes: "Call Center, agenda y confirmaciones.",
+      updatedAt: now
     }
   ],
   schedules: [
@@ -533,6 +601,11 @@ const initialState: CentralState = {
           status: "pendiente-aprobacion",
           doctorName: "Dra. Elena Vargas",
           createdAt: "2026-06-05T16:20:00.000Z",
+          summary: "Control general estable. Presion arterial controlada y sin signos de alarma al momento de la consulta.",
+          prescription: "Mantener tratamiento actual. Revisar dosis solo con aprobacion medica.",
+          nextAppointment: "2026-06-10 09:30",
+          medicalImages: ["historial-control-general.pdf", "signos-vitales-2026-06-05.png"],
+          signedByDoctor: "",
           deliveryChannels: ["email", "whatsapp"]
         }
       ],
@@ -581,6 +654,11 @@ const initialState: CentralState = {
           status: "pendiente-aprobacion",
           doctorName: "Dr. Marco Solis",
           createdAt: "2026-06-03T18:10:00.000Z",
+          summary: "Control metabolico pendiente de correlacion con laboratorios. Se recomienda seguimiento de glucosa.",
+          prescription: "Borrador de receta sujeto a revision del medico tratante antes de entrega.",
+          nextAppointment: "2026-06-11 11:00",
+          medicalImages: ["control-metabolico-previo.pdf"],
+          signedByDoctor: "",
           deliveryChannels: ["email"]
         },
         {
@@ -590,6 +668,11 @@ const initialState: CentralState = {
           status: "borrador",
           doctorName: "Dr. Marco Solis",
           createdAt: "2026-06-03T18:16:00.000Z",
+          summary: "Orden de laboratorio para control de glucosa, perfil lipidico y parametros cardiometabolicos.",
+          prescription: "No aplica receta. Orden requiere validacion medica antes de enviar.",
+          nextAppointment: "2026-06-11 11:00",
+          medicalImages: ["orden-laboratorio-borrador.pdf"],
+          signedByDoctor: "",
           deliveryChannels: ["email", "whatsapp"]
         }
       ],
@@ -638,6 +721,11 @@ const initialState: CentralState = {
           status: "pendiente-aprobacion",
           doctorName: "Dra. Elena Vargas",
           createdAt: "2026-05-29T20:00:00.000Z",
+          summary: "Seguimiento respiratorio por asma. Se deben validar sintomas recientes y uso de inhalador.",
+          prescription: "Indicaciones de inhalador pendientes de firma medica.",
+          nextAppointment: "2026-06-14 15:00",
+          medicalImages: ["seguimiento-respiratorio.pdf", "espirometria-previa.png"],
+          signedByDoctor: "",
           deliveryChannels: ["email"]
         }
       ],
@@ -796,6 +884,8 @@ function makeId(prefix: string) {
 type LegacyPatientRecord = Partial<PatientRecord> &
   Pick<PatientRecord, "id" | "clinicId" | "name" | "documentId">;
 
+type LegacyStaffMember = Partial<StaffMember> & Pick<StaffMember, "id" | "clinicId" | "name" | "role" | "email">;
+
 type LegacyAppointmentRecord = Partial<AppointmentRecord> &
   Pick<
     AppointmentRecord,
@@ -822,6 +912,31 @@ function appointmentTime(value: string) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function normalizeStaff(member: LegacyStaffMember): StaffMember {
+  const isDoctor = member.role === "medico";
+
+  return {
+    id: member.id,
+    clinicId: member.clinicId,
+    name: member.name,
+    role: member.role,
+    email: member.email,
+    phone: member.phone ?? "",
+    licenseNumber: member.licenseNumber ?? "",
+    specialty: member.specialty ?? (isDoctor ? "Medicina general" : member.role),
+    status: member.status ?? "activo",
+    verifiedHoursMonth: member.verifiedHoursMonth ?? 0,
+    defaultHonorarium: member.defaultHonorarium ?? 0,
+    currency: member.currency ?? "USD",
+    paymentMethod: member.paymentMethod ?? (isDoctor ? "Transferencia bancaria" : "Planilla"),
+    serviceIds: member.serviceIds ?? [],
+    signatureLabel: member.signatureLabel ?? (isDoctor ? `${member.name}${member.licenseNumber ? ` - ${member.licenseNumber}` : ""}` : ""),
+    reportApprovalEnabled: member.reportApprovalEnabled ?? isDoctor,
+    notes: member.notes ?? "",
+    updatedAt: member.updatedAt ?? now
+  };
+}
+
 function normalizePatient(patient: LegacyPatientRecord): PatientRecord {
   const pendingDocuments = patient.pendingDocuments ?? [];
   const reports = patient.reports ?? pendingDocuments.map((documentName, index) => ({
@@ -831,8 +946,22 @@ function normalizePatient(patient: LegacyPatientRecord): PatientRecord {
     status: "pendiente-aprobacion",
     doctorName: patient.assignedDoctor ?? "Medico pendiente",
     createdAt: patient.updatedAt ?? now,
+    summary: `Borrador pendiente de revision medica para ${patient.name}.`,
+    prescription: documentName === "recetario" ? "Recetario pendiente de aprobacion humana." : "",
+    nextAppointment: patient.nextAppointment ?? "",
+    medicalImages: [],
+    signedByDoctor: "",
     deliveryChannels: ["email", "whatsapp"]
   } satisfies PatientReport));
+
+  const normalizedReports = reports.map((report) => ({
+    ...report,
+    summary: report.summary ?? `Borrador pendiente de revision medica para ${patient.name}.`,
+    prescription: report.prescription ?? "",
+    nextAppointment: report.nextAppointment ?? patient.nextAppointment ?? "",
+    medicalImages: report.medicalImages ?? [],
+    signedByDoctor: report.signedByDoctor ?? ""
+  }));
 
   return {
     id: patient.id,
@@ -856,9 +985,9 @@ function normalizePatient(patient: LegacyPatientRecord): PatientRecord {
     risk: patient.risk ?? "bajo",
     communication: patient.communication ?? { email: Boolean(patient.email), whatsapp: Boolean(patient.whatsapp) },
     pendingDocuments,
-    reports,
+    reports: normalizedReports,
     instructions: patient.instructions ?? [],
-    doctorApprovalRequired: patient.doctorApprovalRequired ?? reports.some((report) => report.status === "pendiente-aprobacion"),
+    doctorApprovalRequired: patient.doctorApprovalRequired ?? normalizedReports.some((report) => report.status === "pendiente-aprobacion"),
     notes: patient.notes ?? "",
     updatedAt: patient.updatedAt ?? now
   };
@@ -911,6 +1040,7 @@ function findAppointmentConflicts(state: CentralState, appointment: AppointmentR
 function ensureStateShape(state: RecoverableCentralState): CentralState {
   state.serviceCatalog ??= structuredClone(initialState.serviceCatalog);
   state.appointments ??= structuredClone(initialState.appointments);
+  state.staff = state.staff.map((member) => normalizeStaff(member));
   state.patients = state.patients.map((patient) => normalizePatient(patient));
   state.appointments = state.appointments.map((appointment) => normalizeAppointment(appointment));
   return state as CentralState;
@@ -1037,6 +1167,117 @@ export function upsertAppointment(input: AppointmentUpsertInput) {
   });
 
   return { appointment: normalized, conflicts };
+}
+
+export function upsertStaff(input: StaffUpsertInput) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const normalized = normalizeStaff({
+    ...input,
+    id: input.id ?? makeId("staff"),
+    updatedAt: timestamp
+  });
+  const index = state.staff.findIndex((member) => member.id === normalized.id);
+  const previousName = index >= 0 ? state.staff[index].name : undefined;
+
+  if (index >= 0) {
+    state.staff[index] = normalized;
+  } else {
+    state.staff.unshift(normalized);
+  }
+
+  if (previousName && previousName !== normalized.name) {
+    state.schedules.forEach((schedule) => {
+      if (schedule.doctorId === normalized.id) schedule.doctorName = normalized.name;
+    });
+    state.appointments.forEach((appointment) => {
+      if (appointment.doctorId === normalized.id) appointment.doctorName = normalized.name;
+    });
+    state.patients.forEach((patient) => {
+      patient.reports.forEach((report) => {
+        if (report.doctorName === previousName) report.doctorName = normalized.name;
+      });
+    });
+  }
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: normalized.clinicId,
+    type: index >= 0 ? "staff.updated" : "staff.created",
+    message: `${normalized.name} ${index >= 0 ? "actualizado" : "agregado"} en personal medico.`,
+    at: timestamp
+  });
+
+  return normalized;
+}
+
+export function replaceDoctorSchedules(doctorId: string, schedules: DoctorScheduleUpsertInput[]) {
+  const state = getState();
+  const doctor = state.staff.find((member) => member.id === doctorId);
+  if (!doctor) return [];
+
+  const timestamp = new Date().toISOString();
+  state.schedules = state.schedules.filter((schedule) => schedule.doctorId !== doctorId);
+  const normalizedSchedules: DoctorSchedule[] = schedules.map((schedule) => ({
+    ...schedule,
+    id: schedule.id || makeId("sch"),
+    clinicId: doctor.clinicId,
+    doctorId,
+    doctorName: doctor.name,
+    specialty: schedule.specialty || doctor.specialty
+  }));
+
+  state.schedules.unshift(...normalizedSchedules);
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: doctor.clinicId,
+    type: "doctor.schedules.updated",
+    message: `Horarios de ${doctor.name} actualizados para agenda y pagos.`,
+    at: timestamp
+  });
+
+  return normalizedSchedules;
+}
+
+export function approvePatientReport(input: {
+  clinicId: string;
+  patientId: string;
+  reportId: string;
+  doctorId: string;
+  deliveryChannels: ("email" | "whatsapp")[];
+}) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const patient = state.patients.find((item) => item.id === input.patientId && item.clinicId === input.clinicId);
+  const doctor = state.staff.find((item) => item.id === input.doctorId && item.clinicId === input.clinicId);
+  const report = patient?.reports.find((item) => item.id === input.reportId);
+  if (!patient || !doctor || !report) return undefined;
+
+  report.status = "aprobado";
+  report.approvedAt = timestamp;
+  report.doctorName = doctor.name;
+  report.signedByDoctor = doctor.signatureLabel || doctor.name;
+  report.deliveryChannels = input.deliveryChannels;
+  patient.pendingDocuments = patient.pendingDocuments.filter((documentName) => documentName !== report.type && documentName !== report.title);
+  patient.doctorApprovalRequired = patient.reports.some((item) => item.status === "pendiente-aprobacion");
+  patient.updatedAt = timestamp;
+
+  state.appointments.forEach((appointment) => {
+    if (appointment.patientId === patient.id && appointment.doctorId === doctor.id && appointment.reportDeliveryStatus === "aprobacion-medica") {
+      appointment.reportDeliveryStatus = "listo-envio";
+      appointment.updatedAt = timestamp;
+    }
+  });
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: input.clinicId,
+    type: "doctor.report.approved",
+    message: `${doctor.name} aprobo ${report.title} para ${patient.name}.`,
+    at: timestamp
+  });
+
+  return { patient, report, doctor };
 }
 
 export function patchTask(taskId: string, patch: Partial<AutomationTask>) {

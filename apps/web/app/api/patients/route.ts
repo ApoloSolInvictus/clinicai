@@ -13,6 +13,11 @@ const reportSchema = z.object({
   doctorName: z.string().min(1).max(120),
   createdAt: z.string().min(1),
   approvedAt: z.string().optional(),
+  summary: z.string().max(2000).default("Borrador pendiente de revision medica."),
+  prescription: z.string().max(2000).default(""),
+  nextAppointment: z.string().default(""),
+  medicalImages: z.array(z.string().min(1).max(180)).default([]),
+  signedByDoctor: z.string().max(180).default(""),
   deliveryChannels: z.array(channelSchema).default([])
 });
 

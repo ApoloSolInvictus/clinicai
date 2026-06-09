@@ -712,6 +712,162 @@ h1 {
   align-items: flex-start;
 }
 
+.doctor-module {
+  display: grid;
+  gap: 14px;
+}
+
+.doctor-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.doctor-directory,
+.doctor-editor,
+.schedule-editor-list,
+.doctor-report-reader,
+.report-list,
+.report-reader-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.doctor-list-item,
+.report-list-item {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.doctor-list-item.active,
+.report-list-item.active {
+  border-color: rgba(79, 70, 229, 0.28);
+  background: rgba(79, 70, 229, 0.07);
+}
+
+.doctor-list-item strong,
+.report-list-item strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.doctor-list-item span,
+.report-list-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.doctor-list-item .status-chip,
+.report-list-item .status-chip {
+  justify-self: start;
+}
+
+.doctor-service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.service-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.service-check input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--teal);
+}
+
+.service-check span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.service-check strong {
+  font-size: 13px;
+}
+
+.service-check small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.schedule-editor-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 92px 92px 90px minmax(120px, 1fr) 36px;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.schedule-remove {
+  align-self: end;
+}
+
+.doctor-support-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.doctor-report-reader {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+}
+
+.report-reader-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.report-reader-panel h3 {
+  font-size: 15px;
+}
+
+.report-reader-panel p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.reader-block {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.reader-block strong {
+  font-size: 13px;
+}
+
 .patient-module {
   display: grid;
   gap: 14px;
@@ -1236,6 +1392,11 @@ h1 {
   .agenda-toolbar,
   .agenda-workspace,
   .agenda-support-grid,
+  .doctor-workspace,
+  .doctor-support-grid,
+  .doctor-report-reader,
+  .doctor-service-grid,
+  .schedule-editor-row,
   .patient-workspace,
   .patient-form-grid-compact,
   .cash-grid,

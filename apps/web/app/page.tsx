@@ -343,6 +343,57 @@ function cloneAppointment(appointment: AppointmentRecord): AppointmentRecord {
   };
 }
 
+function createEmptyDoctor(clinicId: string): StaffMember {
+  return {
+    id: "",
+    clinicId,
+    name: "",
+    role: "medico",
+    email: "",
+    phone: "",
+    licenseNumber: "",
+    specialty: "Medicina general",
+    status: "activo",
+    verifiedHoursMonth: 0,
+    defaultHonorarium: 0,
+    currency: "USD",
+    paymentMethod: "Transferencia bancaria",
+    serviceIds: [],
+    signatureLabel: "",
+    reportApprovalEnabled: true,
+    notes: "",
+    updatedAt: ""
+  };
+}
+
+function cloneDoctor(doctor: StaffMember): StaffMember {
+  return {
+    ...doctor,
+    serviceIds: [...doctor.serviceIds]
+  };
+}
+
+function createEmptySchedule(clinicId: string, doctor: StaffMember): DoctorSchedule {
+  return {
+    id: `draft-schedule-${Date.now()}`,
+    clinicId,
+    doctorId: doctor.id,
+    doctorName: doctor.name,
+    specialty: doctor.specialty,
+    day: "Lunes",
+    startsAt: "08:00",
+    endsAt: "12:00",
+    verifiedHours: 4,
+    appointments: 0,
+    status: "pendiente"
+  };
+}
+
+type DoctorReportContext = {
+  patient: PatientRecord;
+  report: PatientReport;
+};
+
 export default function Home() {
   const session = useFirebaseSession();
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
@@ -495,6 +546,96 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveDoctorProfile(doctor: StaffMember, schedules: DoctorSchedule[]) {
+    setBusy(true);
+    try {
+      const { updatedAt: _updatedAt, ...payloadDoctor } = doctor;
+      const response = await fetch("/api/doctors", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({
+          doctor: {
+            ...payloadDoctor,
+            id: payloadDoctor.id || undefined,
+            clinicId,
+            role: "medico"
+          },
+          schedules: schedules.map(({ id, ...schedule }) => ({
+            ...schedule,
+            id: id.startsWith("draft-schedule-") ? undefined : id,
+            clinicId,
+            doctorId: payloadDoctor.id || "",
+            doctorName: payloadDoctor.name,
+            specialty: schedule.specialty || payloadDoctor.specialty
+          }))
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo guardar el medico.");
+      }
+
+      setState(payload.state);
+      setResult(JSON.stringify({ doctor: payload.doctor, schedules: payload.schedules, saved: true }, null, 2));
+      return payload.doctor as StaffMember;
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo guardar el medico.");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveReportAndPrepareDelivery(input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/doctor-reports", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({
+          clinicId,
+          patientId: input.patient.id,
+          reportId: input.report.id,
+          doctorId: input.doctor.id,
+          deliveryChannels: input.deliveryChannels
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo aprobar el reporte.");
+      }
+
+      setState(payload.state);
+      setResult(JSON.stringify({ report: payload.report, approved: true }, null, 2));
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo aprobar el reporte.");
+      return;
+    } finally {
+      setBusy(false);
+    }
+
+    await sendTask({
+      clinicId,
+      intent: "historial",
+      priority: "critica",
+      prompt:
+        `Reporte aprobado humanamente por ${input.doctor.name}. ` +
+        `Paciente: ${input.patient.name} (${input.patient.documentId}). ` +
+        `Reporte: ${input.report.title}. Tipo: ${reportTypeLabels[input.report.type]}. ` +
+        `Firma: ${input.doctor.signatureLabel || input.doctor.name}. ` +
+        `Canales autorizados: ${input.deliveryChannels.join(", ")}. ` +
+        `Imagenes/documentos: ${input.report.medicalImages.join(", ") || "sin imagenes adjuntas"}. ` +
+        `Recetario/indicaciones: ${input.report.prescription || "sin recetario"}. ` +
+        `Proxima cita: ${input.report.nextAppointment || input.patient.nextAppointment || "pendiente"}. ` +
+        "Prepara el paquete de envio por correo y WhatsApp sin modificar el contenido medico aprobado, con trazabilidad para auditoria."
+    });
   }
 
   async function prepareAppointmentReminders(appointment: AppointmentRecord) {
@@ -878,7 +1019,19 @@ export default function Home() {
                 onPrepareClinicalDocuments={preparePatientClinicalDocuments}
               />
             ) : null}
-            {activeModule === "medicos" ? <DoctorsModule staff={clinicStaff} schedules={clinicSchedules} /> : null}
+            {activeModule === "medicos" ? (
+              <DoctorsModule
+                staff={clinicStaff}
+                schedules={clinicSchedules}
+                services={clinicServices}
+                appointments={clinicAppointments}
+                patients={clinicPatients}
+                clinicId={clinicId}
+                busy={busy}
+                onSaveDoctorProfile={saveDoctorProfile}
+                onApproveReport={approveReportAndPrepareDelivery}
+              />
+            ) : null}
             {activeModule === "caja" ? (
               <CashModule cashRegisters={clinicCash} automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
             ) : null}
@@ -1594,6 +1747,11 @@ function PatientsModule({
       status: reportDraft.status,
       doctorName: reportDraft.doctorName.trim() || draft.assignedDoctor || "Medico pendiente",
       createdAt: new Date().toISOString(),
+      summary: `Borrador de ${reportTypeLabels[reportDraft.type]} para ${draft.name || "paciente pendiente"}.`,
+      prescription: reportDraft.type === "recetario" ? "Recetario pendiente de aprobacion medica." : "",
+      nextAppointment: draft.nextAppointment,
+      medicalImages: [],
+      signedByDoctor: "",
       deliveryChannels: reportDraft.deliveryChannels
     };
 
@@ -2191,27 +2349,480 @@ function PatientsModule({
   );
 }
 
-function DoctorsModule({ staff, schedules }: { staff: StaffMember[]; schedules: DoctorSchedule[] }) {
+function DoctorsModule({
+  staff,
+  schedules,
+  services,
+  appointments,
+  patients,
+  clinicId,
+  busy,
+  onSaveDoctorProfile,
+  onApproveReport
+}: {
+  staff: StaffMember[];
+  schedules: DoctorSchedule[];
+  services: ServiceCatalogItem[];
+  appointments: AppointmentRecord[];
+  patients: PatientRecord[];
+  clinicId: string;
+  busy: boolean;
+  onSaveDoctorProfile: (doctor: StaffMember, schedules: DoctorSchedule[]) => Promise<StaffMember | undefined>;
+  onApproveReport: (input: {
+    patient: PatientRecord;
+    report: PatientReport;
+    doctor: StaffMember;
+    deliveryChannels: ("email" | "whatsapp")[];
+  }) => void;
+}) {
   const doctors = staff.filter((member) => member.role === "medico");
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [selectedDoctorId, setSelectedDoctorId] = useState(doctors[0]?.id ?? "");
+  const selectedDoctor = doctors.find((doctor) => doctor.id === selectedDoctorId);
+  const [draft, setDraft] = useState<StaffMember>(() => (selectedDoctor ? cloneDoctor(selectedDoctor) : createEmptyDoctor(clinicId)));
+  const [draftSchedules, setDraftSchedules] = useState<DoctorSchedule[]>(() =>
+    selectedDoctor ? schedules.filter((schedule) => schedule.doctorId === selectedDoctor.id) : []
+  );
+  const reportContexts = useMemo<DoctorReportContext[]>(
+    () =>
+      patients.flatMap((patient) =>
+        patient.reports.map((report) => ({
+          patient,
+          report
+        }))
+      ),
+    [patients]
+  );
+  const visibleReports = reportContexts.filter(
+    (item) => !draft.name || item.report.doctorName === draft.name || item.report.status === "pendiente-aprobacion"
+  );
+  const [selectedReportId, setSelectedReportId] = useState(visibleReports[0]?.report.id ?? "");
+  const selectedReportContext = visibleReports.find((item) => item.report.id === selectedReportId) ?? visibleReports[0];
+  const [approvalChannels, setApprovalChannels] = useState<("email" | "whatsapp")[]>(selectedReportContext?.report.deliveryChannels ?? ["email"]);
+
+  const doctorFinancials = useMemo(
+    () =>
+      doctors.map((doctor) => {
+        const doctorAppointments = appointments.filter((appointment) => appointment.doctorId === doctor.id && appointment.status !== "cancelada");
+        const serviceHonorarium = doctorAppointments.reduce((total, appointment) => total + appointment.doctorHonorarium, 0);
+        const hourlyPay = doctor.verifiedHoursMonth * doctor.defaultHonorarium;
+
+        return {
+          doctor,
+          appointmentCount: doctorAppointments.length,
+          serviceHonorarium,
+          hourlyPay,
+          total: serviceHonorarium + hourlyPay
+        };
+      }),
+    [appointments, doctors]
+  );
+
+  useEffect(() => {
+    if (mode === "existing" && (!selectedDoctorId || !doctors.some((doctor) => doctor.id === selectedDoctorId))) {
+      setSelectedDoctorId(doctors[0]?.id ?? "");
+    }
+  }, [doctors, mode, selectedDoctorId]);
+
+  useEffect(() => {
+    if (mode === "new") {
+      const empty = createEmptyDoctor(clinicId);
+      setDraft(empty);
+      setDraftSchedules([]);
+      return;
+    }
+
+    setDraft(selectedDoctor ? cloneDoctor(selectedDoctor) : createEmptyDoctor(clinicId));
+    setDraftSchedules(selectedDoctor ? schedules.filter((schedule) => schedule.doctorId === selectedDoctor.id) : []);
+  }, [clinicId, mode, schedules, selectedDoctor]);
+
+  useEffect(() => {
+    if (selectedReportContext) {
+      setApprovalChannels(selectedReportContext.report.deliveryChannels.length > 0 ? selectedReportContext.report.deliveryChannels : ["email"]);
+    }
+  }, [selectedReportContext?.report.id]);
+
+  function updateDraft<Key extends keyof StaffMember>(field: Key, value: StaffMember[Key]) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateSchedule(index: number, patch: Partial<DoctorSchedule>) {
+    setDraftSchedules((current) => current.map((schedule, scheduleIndex) => (scheduleIndex === index ? { ...schedule, ...patch } : schedule)));
+  }
+
+  function startNewDoctor() {
+    setMode("new");
+    setSelectedDoctorId("");
+    setDraft(createEmptyDoctor(clinicId));
+    setDraftSchedules([]);
+  }
+
+  function addSchedule() {
+    setDraftSchedules((current) => [...current, createEmptySchedule(clinicId, draft)]);
+  }
+
+  function removeSchedule(index: number) {
+    setDraftSchedules((current) => current.filter((_, scheduleIndex) => scheduleIndex !== index));
+  }
+
+  function toggleDoctorService(serviceId: string, enabled: boolean) {
+    setDraft((current) => ({
+      ...current,
+      serviceIds: enabled ? Array.from(new Set([...current.serviceIds, serviceId])) : current.serviceIds.filter((item) => item !== serviceId)
+    }));
+  }
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = await onSaveDoctorProfile(
+      {
+        ...draft,
+        clinicId,
+        role: "medico",
+        signatureLabel: draft.signatureLabel || `${draft.name}${draft.licenseNumber ? ` - ${draft.licenseNumber}` : ""}`
+      },
+      draftSchedules.map((schedule) => ({
+        ...schedule,
+        clinicId,
+        doctorId: draft.id,
+        doctorName: draft.name,
+        specialty: schedule.specialty || draft.specialty
+      }))
+    );
+
+    if (saved) {
+      setMode("existing");
+      setSelectedDoctorId(saved.id);
+    }
+  }
 
   return (
     <div className="grid">
       <Panel icon={UserCog} title="Medicos">
-        <div className="surface-list">
-          {doctors.map((doctor) => (
-            <div className="surface-row" key={doctor.id}>
-              <div>
-                <strong>{doctor.name}</strong>
-                <p>{doctor.email}</p>
-              </div>
-              <div className="row-metrics">
-                <span>{doctor.verifiedHoursMonth} h/mes</span>
-                <span className={`status-chip ${doctor.status}`}>{doctor.status}</span>
-              </div>
+        <div className="doctor-module">
+          <div className="patient-toolbar">
+            <div className="row-metrics">
+              <span>{doctors.length} medicos</span>
+              <span>{schedules.length} horarios</span>
+              <span>{visibleReports.filter((item) => item.report.status === "pendiente-aprobacion").length} aprobaciones</span>
             </div>
-          ))}
+            <button className="btn primary" type="button" onClick={startNewDoctor} title="Agregar medico">
+              <Plus size={18} />
+              Nuevo medico
+            </button>
+          </div>
+
+          <div className="doctor-workspace">
+            <aside className="doctor-directory" aria-label="Directorio de medicos">
+              {doctors.map((doctor) => (
+                <button
+                  className={`doctor-list-item ${mode === "existing" && doctor.id === selectedDoctorId ? "active" : ""}`}
+                  type="button"
+                  key={doctor.id}
+                  onClick={() => {
+                    setMode("existing");
+                    setSelectedDoctorId(doctor.id);
+                  }}
+                >
+                  <strong>{doctor.name}</strong>
+                  <span>{doctor.specialty}</span>
+                  <span>{doctor.licenseNumber || "Licencia pendiente"}</span>
+                  <span className={`status-chip ${doctor.status}`}>{doctor.status}</span>
+                </button>
+              ))}
+              {doctors.length === 0 ? <div className="empty-state">Sin medicos registrados.</div> : null}
+            </aside>
+
+            <form className="doctor-editor" onSubmit={handleSave}>
+              <div className="patient-editor-header">
+                <div>
+                  <h3>{draft.id ? draft.name || "Medico" : "Nuevo medico"}</h3>
+                  <p>
+                    {draft.specialty || "Especialidad pendiente"} - {draft.licenseNumber || "Licencia pendiente"}
+                  </p>
+                </div>
+                <button className="btn primary" type="submit" disabled={busy} title="Guardar medico">
+                  <Save size={18} />
+                  Guardar medico
+                </button>
+              </div>
+
+              <div className="form-section">
+                <h3>Perfil profesional</h3>
+                <div className="appointment-form-grid">
+                  <div className="field">
+                    <label htmlFor="doctor-name">Nombre completo</label>
+                    <input id="doctor-name" value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} required />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-email">Correo</label>
+                    <input id="doctor-email" type="email" value={draft.email} onChange={(event) => updateDraft("email", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-phone">Telefono</label>
+                    <input id="doctor-phone" value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-license">Licencia medica</label>
+                    <input id="doctor-license" value={draft.licenseNumber} onChange={(event) => updateDraft("licenseNumber", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-specialty">Especialidad</label>
+                    <input id="doctor-specialty" value={draft.specialty} onChange={(event) => updateDraft("specialty", event.target.value)} required />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-status">Estado</label>
+                    <select id="doctor-status" value={draft.status} onChange={(event) => updateDraft("status", event.target.value as StaffMember["status"])}>
+                      <option value="activo">Activo</option>
+                      <option value="pendiente">Pendiente</option>
+                      <option value="suspendido">Suspendido</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-section">
+                <h3>Pagos y firma</h3>
+                <div className="appointment-form-grid">
+                  <div className="field">
+                    <label htmlFor="doctor-hours">Horas verificadas mes</label>
+                    <input
+                      id="doctor-hours"
+                      type="number"
+                      min="0"
+                      value={draft.verifiedHoursMonth}
+                      onChange={(event) => updateDraft("verifiedHoursMonth", Number(event.target.value))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-honorarium">Honorario base/hora</label>
+                    <input
+                      id="doctor-honorarium"
+                      type="number"
+                      min="0"
+                      value={draft.defaultHonorarium}
+                      onChange={(event) => updateDraft("defaultHonorarium", Number(event.target.value))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-payment">Metodo de pago</label>
+                    <input id="doctor-payment" value={draft.paymentMethod} onChange={(event) => updateDraft("paymentMethod", event.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="doctor-signature">Firma digital</label>
+                    <input id="doctor-signature" value={draft.signatureLabel} onChange={(event) => updateDraft("signatureLabel", event.target.value)} />
+                  </div>
+                </div>
+                <div className="checkbox-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={draft.reportApprovalEnabled}
+                      onChange={(event) => updateDraft("reportApprovalEnabled", event.target.checked)}
+                    />
+                    <ShieldCheck size={16} />
+                    Aprueba reportes
+                  </label>
+                </div>
+              </div>
+
+              <div className="form-section">
+                <div className="section-title-row">
+                  <h3>Servicios autorizados</h3>
+                  <span className="status-chip">{draft.serviceIds.length}</span>
+                </div>
+                <div className="doctor-service-grid">
+                  {services.map((service) => (
+                    <label className="service-check" key={service.id}>
+                      <input
+                        type="checkbox"
+                        checked={draft.serviceIds.includes(service.id)}
+                        onChange={(event) => toggleDoctorService(service.id, event.target.checked)}
+                      />
+                      <span>
+                        <strong>{service.name}</strong>
+                        <small>
+                          {money(service.price, service.currency)} - {money(service.doctorHonorarium, service.currency)} medico
+                        </small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-section">
+                <div className="section-title-row">
+                  <h3>Horarios verificados</h3>
+                  <button className="btn" type="button" onClick={addSchedule} title="Agregar horario">
+                    <Plus size={18} />
+                    Agregar horario
+                  </button>
+                </div>
+                <div className="schedule-editor-list">
+                  {draftSchedules.map((schedule, index) => (
+                    <div className="schedule-editor-row" key={schedule.id}>
+                      <div className="field">
+                        <label>Dia</label>
+                        <select value={schedule.day} onChange={(event) => updateSchedule(index, { day: event.target.value })}>
+                          {["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"].map((day) => (
+                            <option value={day} key={day}>
+                              {day}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>Inicio</label>
+                        <input value={schedule.startsAt} onChange={(event) => updateSchedule(index, { startsAt: event.target.value })} />
+                      </div>
+                      <div className="field">
+                        <label>Fin</label>
+                        <input value={schedule.endsAt} onChange={(event) => updateSchedule(index, { endsAt: event.target.value })} />
+                      </div>
+                      <div className="field">
+                        <label>Horas</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={schedule.verifiedHours}
+                          onChange={(event) => updateSchedule(index, { verifiedHours: Number(event.target.value) })}
+                        />
+                      </div>
+                      <div className="field">
+                        <label>Estado</label>
+                        <select value={schedule.status} onChange={(event) => updateSchedule(index, { status: event.target.value as DoctorSchedule["status"] })}>
+                          <option value="verificado">Verificado</option>
+                          <option value="pendiente">Pendiente</option>
+                          <option value="conflicto">Conflicto</option>
+                        </select>
+                      </div>
+                      <button className="icon-btn danger schedule-remove" type="button" onClick={() => removeSchedule(index)} title="Quitar horario">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {draftSchedules.length === 0 ? <div className="empty-state">Sin horarios asignados.</div> : null}
+                </div>
+              </div>
+
+              <div className="field">
+                <label htmlFor="doctor-notes">Notas</label>
+                <textarea id="doctor-notes" value={draft.notes} onChange={(event) => updateDraft("notes", event.target.value)} />
+              </div>
+            </form>
+          </div>
         </div>
       </Panel>
+
+      <div className="doctor-support-grid">
+        <Panel icon={Clock3} title="Reporte financiero medico">
+          <div className="surface-list">
+            {doctorFinancials.map((item) => (
+              <div className="surface-row" key={item.doctor.id}>
+                <div>
+                  <strong>{item.doctor.name}</strong>
+                  <p>
+                    {item.appointmentCount} citas - {item.doctor.verifiedHoursMonth} horas verificadas
+                  </p>
+                </div>
+                <div className="row-metrics">
+                  <span>{money(item.serviceHonorarium, item.doctor.currency)} servicios</span>
+                  <span>{money(item.hourlyPay, item.doctor.currency)} horas</span>
+                  <span className="status-chip listo">{money(item.total, item.doctor.currency)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel icon={FileText} title="Lector y aprobacion humana">
+          <div className="doctor-report-reader">
+            <div className="report-list">
+              {visibleReports.map((item) => (
+                <button
+                  className={`report-list-item ${selectedReportContext?.report.id === item.report.id ? "active" : ""}`}
+                  type="button"
+                  key={`${item.patient.id}-${item.report.id}`}
+                  onClick={() => setSelectedReportId(item.report.id)}
+                >
+                  <strong>{item.report.title}</strong>
+                  <span>{item.patient.name}</span>
+                  <span className={`status-chip ${item.report.status}`}>{reportStatusLabels[item.report.status]}</span>
+                </button>
+              ))}
+              {visibleReports.length === 0 ? <div className="empty-state">Sin reportes para revisar.</div> : null}
+            </div>
+
+            {selectedReportContext ? (
+              <div className="report-reader-panel">
+                <div className="section-title-row">
+                  <div>
+                    <h3>{selectedReportContext.report.title}</h3>
+                    <p>
+                      {selectedReportContext.patient.name} - {reportTypeLabels[selectedReportContext.report.type]}
+                    </p>
+                  </div>
+                  <span className={`status-chip ${selectedReportContext.report.status}`}>
+                    {reportStatusLabels[selectedReportContext.report.status]}
+                  </span>
+                </div>
+                <div className="reader-block">
+                  <strong>Resumen clinico</strong>
+                  <p>{selectedReportContext.report.summary}</p>
+                </div>
+                <div className="reader-block">
+                  <strong>Recetario e indicaciones</strong>
+                  <p>{selectedReportContext.report.prescription || "Sin recetario registrado."}</p>
+                </div>
+                <div className="tag-row">
+                  {(selectedReportContext.report.medicalImages.length > 0 ? selectedReportContext.report.medicalImages : ["Sin imagenes adjuntas"]).map((imageRef) => (
+                    <span className="tag" key={imageRef}>
+                      {imageRef}
+                    </span>
+                  ))}
+                </div>
+                <div className="checkbox-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={approvalChannels.includes("email")}
+                      onChange={(event) => setApprovalChannels((current) => toggleChannel(current, "email", event.target.checked))}
+                    />
+                    <Mail size={16} />
+                    Email
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={approvalChannels.includes("whatsapp")}
+                      onChange={(event) => setApprovalChannels((current) => toggleChannel(current, "whatsapp", event.target.checked))}
+                    />
+                    <MessageCircle size={16} />
+                    WhatsApp
+                  </label>
+                </div>
+                <button
+                  className="btn primary"
+                  type="button"
+                  disabled={busy || !draft.id || !draft.reportApprovalEnabled || selectedReportContext.report.status === "aprobado"}
+                  onClick={() =>
+                    onApproveReport({
+                      patient: selectedReportContext.patient,
+                      report: selectedReportContext.report,
+                      doctor: draft,
+                      deliveryChannels: approvalChannels
+                    })
+                  }
+                  title="Aprobar reporte y preparar envio"
+                >
+                  <ShieldCheck size={18} />
+                  Aprobar y preparar envio
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </Panel>
+      </div>
 
       <Panel icon={Clock3} title="Horas por pagar">
         <div className="surface-list">
