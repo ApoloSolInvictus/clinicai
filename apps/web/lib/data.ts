@@ -199,6 +199,65 @@ export type CashRegister = {
   updatedAt: string;
 };
 
+export type CashPaymentMethod = "efectivo" | "tarjeta" | "sinpe" | "transferencia";
+
+export type CashTransaction = {
+  id: string;
+  clinicId: string;
+  appointmentId?: string;
+  patientId?: string;
+  patientName: string;
+  serviceName: string;
+  method: CashPaymentMethod;
+  amount: number;
+  currency: string;
+  status: "pendiente" | "completado" | "anulado";
+  reference: string;
+  receivedBy: string;
+  paidAt: string;
+  notes: string;
+};
+
+export type CashExpense = {
+  id: string;
+  clinicId: string;
+  category: "empresa" | "medicos" | "insumos" | "servicios" | "alquiler" | "otros";
+  description: string;
+  amount: number;
+  currency: string;
+  method: CashPaymentMethod;
+  status: "pendiente" | "pagado" | "registrado";
+  vendor: string;
+  paidAt: string;
+  notes: string;
+};
+
+export type PendingInvoice = {
+  id: string;
+  clinicId: string;
+  appointmentId?: string;
+  patientId?: string;
+  patientName: string;
+  concept: string;
+  amount: number;
+  currency: string;
+  dueDate: string;
+  status: "pendiente" | "pagada" | "vencida";
+  notes: string;
+};
+
+export type CashTransactionInput = Omit<CashTransaction, "id"> & {
+  id?: string;
+};
+
+export type CashExpenseInput = Omit<CashExpense, "id"> & {
+  id?: string;
+};
+
+export type PendingInvoiceInput = Omit<PendingInvoice, "id"> & {
+  id?: string;
+};
+
 export type ReportSummary = {
   id: string;
   clinicId: string;
@@ -239,6 +298,9 @@ export type CentralState = {
   appointments: AppointmentRecord[];
   patients: PatientRecord[];
   cashRegisters: CashRegister[];
+  cashTransactions: CashTransaction[];
+  cashExpenses: CashExpense[];
+  pendingInvoices: PendingInvoice[];
   reports: ReportSummary[];
   automations: AutomationTemplate[];
 };
@@ -246,6 +308,7 @@ export type CentralState = {
 const now = new Date().toISOString();
 const configuredClinics = getPublicClinics();
 const defaultClinicId = configuredClinics[0]?.id ?? "clinic-san-jose";
+const prototypeUsdToCrc = 500;
 
 const initialState: CentralState = {
   clinics: configuredClinics,
@@ -325,8 +388,8 @@ const initialState: CentralState = {
       specialty: "Medicina general",
       status: "activo",
       verifiedHoursMonth: 128,
-      defaultHonorarium: 42,
-      currency: "USD",
+      defaultHonorarium: 21000,
+      currency: "CRC",
       paymentMethod: "Transferencia bancaria",
       serviceIds: ["svc-consulta-general", "svc-seguimiento-respiratorio"],
       signatureLabel: "Dra. Elena Vargas - MED-CR-10245",
@@ -345,8 +408,8 @@ const initialState: CentralState = {
       specialty: "Cardiologia",
       status: "activo",
       verifiedHoursMonth: 96,
-      defaultHonorarium: 55,
-      currency: "USD",
+      defaultHonorarium: 27500,
+      currency: "CRC",
       paymentMethod: "Transferencia bancaria",
       serviceIds: ["svc-control-cardiologia", "svc-laboratorio-control"],
       signatureLabel: "Dr. Marco Solis - MED-CR-20412",
@@ -366,7 +429,7 @@ const initialState: CentralState = {
       status: "activo",
       verifiedHoursMonth: 154,
       defaultHonorarium: 0,
-      currency: "USD",
+      currency: "CRC",
       paymentMethod: "Planilla",
       serviceIds: [],
       signatureLabel: "",
@@ -386,7 +449,7 @@ const initialState: CentralState = {
       status: "activo",
       verifiedHoursMonth: 160,
       defaultHonorarium: 0,
-      currency: "USD",
+      currency: "CRC",
       paymentMethod: "Planilla",
       serviceIds: [],
       signatureLabel: "",
@@ -456,9 +519,9 @@ const initialState: CentralState = {
       name: "Consulta general",
       specialty: "Medicina general",
       durationMinutes: 30,
-      price: 75,
-      currency: "USD",
-      doctorHonorarium: 45,
+      price: 37500,
+      currency: "CRC",
+      doctorHonorarium: 22500,
       preparationInstructions: "Llegar 15 minutos antes con documento de identidad y lista de medicamentos activos.",
       requiresReportApproval: true
     },
@@ -468,9 +531,9 @@ const initialState: CentralState = {
       name: "Control cardiologia",
       specialty: "Cardiologia",
       durationMinutes: 45,
-      price: 110,
-      currency: "USD",
-      doctorHonorarium: 65,
+      price: 55000,
+      currency: "CRC",
+      doctorHonorarium: 32500,
       preparationInstructions: "Traer examenes previos y evitar cafeina 4 horas antes si se solicitara electrocardiograma.",
       requiresReportApproval: true
     },
@@ -480,9 +543,9 @@ const initialState: CentralState = {
       name: "Laboratorio y control",
       specialty: "Laboratorio",
       durationMinutes: 45,
-      price: 95,
-      currency: "USD",
-      doctorHonorarium: 50,
+      price: 47500,
+      currency: "CRC",
+      doctorHonorarium: 25000,
       preparationInstructions: "Ayuno de 8 horas cuando aplique. Confirmar medicamentos activos antes de enviar instrucciones.",
       requiresReportApproval: true
     },
@@ -492,9 +555,9 @@ const initialState: CentralState = {
       name: "Seguimiento respiratorio",
       specialty: "Medicina general",
       durationMinutes: 45,
-      price: 90,
-      currency: "USD",
-      doctorHonorarium: 55,
+      price: 45000,
+      currency: "CRC",
+      doctorHonorarium: 27500,
       preparationInstructions: "Traer inhaladores actuales y anotar sintomas de los ultimos 7 dias.",
       requiresReportApproval: true
     }
@@ -511,9 +574,9 @@ const initialState: CentralState = {
       serviceName: "Consulta general",
       startsAt: "2026-06-10T09:30",
       endsAt: "2026-06-10T10:00",
-      price: 75,
-      currency: "USD",
-      doctorHonorarium: 45,
+      price: 37500,
+      currency: "CRC",
+      doctorHonorarium: 22500,
       status: "confirmada",
       paymentStatus: "pendiente",
       reminderChannels: ["email", "whatsapp"],
@@ -534,9 +597,9 @@ const initialState: CentralState = {
       serviceName: "Laboratorio y control",
       startsAt: "2026-06-11T11:00",
       endsAt: "2026-06-11T11:45",
-      price: 95,
-      currency: "USD",
-      doctorHonorarium: 50,
+      price: 47500,
+      currency: "CRC",
+      doctorHonorarium: 25000,
       status: "confirmada",
       paymentStatus: "pendiente",
       reminderChannels: ["email", "whatsapp"],
@@ -557,9 +620,9 @@ const initialState: CentralState = {
       serviceName: "Seguimiento respiratorio",
       startsAt: "2026-06-14T15:00",
       endsAt: "2026-06-14T15:45",
-      price: 90,
-      currency: "USD",
-      doctorHonorarium: 55,
+      price: 45000,
+      currency: "CRC",
+      doctorHonorarium: 27500,
       status: "solicitada",
       paymentStatus: "pendiente",
       reminderChannels: ["email"],
@@ -750,10 +813,10 @@ const initialState: CentralState = {
       id: "cash-day",
       clinicId: defaultClinicId,
       period: "diario",
-      revenue: 1275,
-      expenses: 210,
-      pendingInvoices: 8,
-      currency: "USD",
+      revenue: 85000,
+      expenses: 22000,
+      pendingInvoices: 2,
+      currency: "CRC",
       status: "requiere-revision",
       preparedBy: "Ana Rojas",
       updatedAt: now
@@ -762,10 +825,10 @@ const initialState: CentralState = {
       id: "cash-week",
       clinicId: defaultClinicId,
       period: "semanal",
-      revenue: 6890,
-      expenses: 1320,
-      pendingInvoices: 19,
-      currency: "USD",
+      revenue: 327500,
+      expenses: 92000,
+      pendingInvoices: 4,
+      currency: "CRC",
       status: "listo-contador",
       preparedBy: "Ana Rojas",
       updatedAt: now
@@ -774,13 +837,101 @@ const initialState: CentralState = {
       id: "cash-month",
       clinicId: defaultClinicId,
       period: "mensual",
-      revenue: 28400,
-      expenses: 9410,
-      pendingInvoices: 34,
-      currency: "USD",
+      revenue: 1450000,
+      expenses: 485000,
+      pendingInvoices: 7,
+      currency: "CRC",
       status: "abierto",
       preparedBy: "Contabilidad",
       updatedAt: now
+    }
+  ],
+  cashTransactions: [
+    {
+      id: "pay-100",
+      clinicId: defaultClinicId,
+      appointmentId: "appt-100",
+      patientId: "pat-100",
+      patientName: "Maria Fernanda Rojas",
+      serviceName: "Consulta general",
+      method: "sinpe",
+      amount: 37500,
+      currency: "CRC",
+      status: "completado",
+      reference: "SINPE-1001",
+      receivedBy: "Ana Rojas",
+      paidAt: "2026-06-10T09:15",
+      notes: "Pago completado antes de consulta."
+    },
+    {
+      id: "pay-101",
+      clinicId: defaultClinicId,
+      appointmentId: "appt-101",
+      patientId: "pat-101",
+      patientName: "Jorge Alberto Mendez",
+      serviceName: "Laboratorio y control",
+      method: "tarjeta",
+      amount: 47500,
+      currency: "CRC",
+      status: "completado",
+      reference: "TARJ-2104",
+      receivedBy: "Ana Rojas",
+      paidAt: "2026-06-11T10:40",
+      notes: "Voucher tarjeta registrado."
+    }
+  ],
+  cashExpenses: [
+    {
+      id: "exp-100",
+      clinicId: defaultClinicId,
+      category: "insumos",
+      description: "Insumos medicos de consulta",
+      amount: 18000,
+      currency: "CRC",
+      method: "efectivo",
+      status: "pagado",
+      vendor: "Proveedor local",
+      paidAt: "2026-06-10T13:00",
+      notes: "Compra diaria para sala de procedimientos."
+    },
+    {
+      id: "exp-101",
+      clinicId: defaultClinicId,
+      category: "servicios",
+      description: "Servicio de mensajeria clinica",
+      amount: 4000,
+      currency: "CRC",
+      method: "sinpe",
+      status: "registrado",
+      vendor: "Mensajeria CR",
+      paidAt: "2026-06-10T15:30",
+      notes: "Entrega de documentos fisicos."
+    }
+  ],
+  pendingInvoices: [
+    {
+      id: "inv-100",
+      clinicId: defaultClinicId,
+      appointmentId: "appt-102",
+      patientId: "pat-102",
+      patientName: "Sofia Camila Alvarez",
+      concept: "Seguimiento respiratorio",
+      amount: 45000,
+      currency: "CRC",
+      dueDate: "2026-06-14",
+      status: "pendiente",
+      notes: "Pendiente de pago el dia de la cita."
+    },
+    {
+      id: "inv-101",
+      clinicId: defaultClinicId,
+      patientName: "Empresa convenio",
+      concept: "Factura mensual por servicios medicos",
+      amount: 90000,
+      currency: "CRC",
+      dueDate: "2026-06-30",
+      status: "pendiente",
+      notes: "Convenio empresarial pendiente de cobro."
     }
   ],
   reports: [
@@ -792,9 +943,9 @@ const initialState: CentralState = {
       status: "requiere-aprobacion",
       updatedAt: now,
       metrics: [
-        { label: "Ingresos", value: "$28,400" },
-        { label: "Gastos", value: "$9,410" },
-        { label: "Pendientes", value: "34" }
+        { label: "Ingresos", value: "₡1,450,000" },
+        { label: "Gastos", value: "₡485,000" },
+        { label: "Pendientes", value: "7" }
       ]
     },
     {
@@ -892,8 +1043,20 @@ type LegacyAppointmentRecord = Partial<AppointmentRecord> &
     "id" | "clinicId" | "patientId" | "patientName" | "doctorId" | "doctorName" | "serviceId" | "serviceName" | "startsAt"
   >;
 
-type RecoverableCentralState = Omit<CentralState, "serviceCatalog" | "appointments"> &
-  Partial<Pick<CentralState, "serviceCatalog" | "appointments">>;
+type LegacyCashRegister = Partial<CashRegister> & Pick<CashRegister, "id" | "clinicId" | "period">;
+
+type LegacyCashTransaction = Partial<CashTransaction> &
+  Pick<CashTransaction, "id" | "clinicId" | "patientName" | "serviceName" | "method" | "amount">;
+
+type LegacyCashExpense = Partial<CashExpense> & Pick<CashExpense, "id" | "clinicId" | "category" | "description" | "amount">;
+
+type LegacyPendingInvoice = Partial<PendingInvoice> & Pick<PendingInvoice, "id" | "clinicId" | "patientName" | "concept" | "amount">;
+
+type RecoverableCentralState = Omit<
+  CentralState,
+  "serviceCatalog" | "appointments" | "cashTransactions" | "cashExpenses" | "pendingInvoices"
+> &
+  Partial<Pick<CentralState, "serviceCatalog" | "appointments" | "cashTransactions" | "cashExpenses" | "pendingInvoices">>;
 
 function localDateTime(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -912,8 +1075,27 @@ function appointmentTime(value: string) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function crcAmount(value: number | undefined, currency: string | undefined) {
+  const amount = value ?? 0;
+  return currency === "USD" ? Math.round(amount * prototypeUsdToCrc) : amount;
+}
+
+function crcCurrency() {
+  return "CRC";
+}
+
+function normalizeService(service: ServiceCatalogItem): ServiceCatalogItem {
+  return {
+    ...service,
+    price: crcAmount(service.price, service.currency),
+    currency: crcCurrency(),
+    doctorHonorarium: crcAmount(service.doctorHonorarium, service.currency)
+  };
+}
+
 function normalizeStaff(member: LegacyStaffMember): StaffMember {
   const isDoctor = member.role === "medico";
+  const sourceCurrency = member.currency ?? "CRC";
 
   return {
     id: member.id,
@@ -926,8 +1108,8 @@ function normalizeStaff(member: LegacyStaffMember): StaffMember {
     specialty: member.specialty ?? (isDoctor ? "Medicina general" : member.role),
     status: member.status ?? "activo",
     verifiedHoursMonth: member.verifiedHoursMonth ?? 0,
-    defaultHonorarium: member.defaultHonorarium ?? 0,
-    currency: member.currency ?? "USD",
+    defaultHonorarium: crcAmount(member.defaultHonorarium, sourceCurrency),
+    currency: crcCurrency(),
     paymentMethod: member.paymentMethod ?? (isDoctor ? "Transferencia bancaria" : "Planilla"),
     serviceIds: member.serviceIds ?? [],
     signatureLabel: member.signatureLabel ?? (isDoctor ? `${member.name}${member.licenseNumber ? ` - ${member.licenseNumber}` : ""}` : ""),
@@ -997,6 +1179,7 @@ function normalizeAppointment(appointment: LegacyAppointmentRecord): Appointment
   const service = initialState.serviceCatalog.find((item) => item.id === appointment.serviceId);
   const startsAt = appointment.startsAt;
   const duration = service?.durationMinutes ?? 30;
+  const sourceCurrency = appointment.currency ?? service?.currency ?? "CRC";
 
   return {
     id: appointment.id,
@@ -1009,9 +1192,9 @@ function normalizeAppointment(appointment: LegacyAppointmentRecord): Appointment
     serviceName: appointment.serviceName,
     startsAt,
     endsAt: appointment.endsAt ?? addMinutes(startsAt, duration),
-    price: appointment.price ?? service?.price ?? 0,
-    currency: appointment.currency ?? service?.currency ?? "USD",
-    doctorHonorarium: appointment.doctorHonorarium ?? service?.doctorHonorarium ?? 0,
+    price: crcAmount(appointment.price ?? service?.price, sourceCurrency),
+    currency: crcCurrency(),
+    doctorHonorarium: crcAmount(appointment.doctorHonorarium ?? service?.doctorHonorarium, sourceCurrency),
     status: appointment.status ?? "solicitada",
     paymentStatus: appointment.paymentStatus ?? "pendiente",
     reminderChannels: appointment.reminderChannels ?? ["email", "whatsapp"],
@@ -1020,6 +1203,80 @@ function normalizeAppointment(appointment: LegacyAppointmentRecord): Appointment
     createdBy: appointment.createdBy ?? "Call Center",
     notes: appointment.notes ?? "",
     updatedAt: appointment.updatedAt ?? now
+  };
+}
+
+function normalizeCashRegister(register: LegacyCashRegister): CashRegister {
+  const sourceCurrency = register.currency ?? "CRC";
+
+  return {
+    id: register.id,
+    clinicId: register.clinicId,
+    period: register.period,
+    revenue: crcAmount(register.revenue, sourceCurrency),
+    expenses: crcAmount(register.expenses, sourceCurrency),
+    pendingInvoices: register.pendingInvoices ?? 0,
+    currency: crcCurrency(),
+    status: register.status ?? "abierto",
+    preparedBy: register.preparedBy ?? "Caja",
+    updatedAt: register.updatedAt ?? now
+  };
+}
+
+function normalizeCashTransaction(transaction: LegacyCashTransaction): CashTransaction {
+  const sourceCurrency = transaction.currency ?? "CRC";
+
+  return {
+    id: transaction.id,
+    clinicId: transaction.clinicId,
+    appointmentId: transaction.appointmentId,
+    patientId: transaction.patientId,
+    patientName: transaction.patientName,
+    serviceName: transaction.serviceName,
+    method: transaction.method,
+    amount: crcAmount(transaction.amount, sourceCurrency),
+    currency: crcCurrency(),
+    status: transaction.status ?? "completado",
+    reference: transaction.reference ?? "",
+    receivedBy: transaction.receivedBy ?? "Caja",
+    paidAt: transaction.paidAt ?? now,
+    notes: transaction.notes ?? ""
+  };
+}
+
+function normalizeCashExpense(expense: LegacyCashExpense): CashExpense {
+  const sourceCurrency = expense.currency ?? "CRC";
+
+  return {
+    id: expense.id,
+    clinicId: expense.clinicId,
+    category: expense.category,
+    description: expense.description,
+    amount: crcAmount(expense.amount, sourceCurrency),
+    currency: crcCurrency(),
+    method: expense.method ?? "efectivo",
+    status: expense.status ?? "registrado",
+    vendor: expense.vendor ?? "",
+    paidAt: expense.paidAt ?? now,
+    notes: expense.notes ?? ""
+  };
+}
+
+function normalizePendingInvoice(invoice: LegacyPendingInvoice): PendingInvoice {
+  const sourceCurrency = invoice.currency ?? "CRC";
+
+  return {
+    id: invoice.id,
+    clinicId: invoice.clinicId,
+    appointmentId: invoice.appointmentId,
+    patientId: invoice.patientId,
+    patientName: invoice.patientName,
+    concept: invoice.concept,
+    amount: crcAmount(invoice.amount, sourceCurrency),
+    currency: crcCurrency(),
+    dueDate: invoice.dueDate ?? now.slice(0, 10),
+    status: invoice.status ?? "pendiente",
+    notes: invoice.notes ?? ""
   };
 }
 
@@ -1037,12 +1294,94 @@ function findAppointmentConflicts(state: CentralState, appointment: AppointmentR
   });
 }
 
+function dateAt(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function isSameDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+}
+
+function isSameMonth(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
+}
+
+function isInsidePeriod(value: string, period: CashRegister["period"], anchor = new Date()) {
+  const date = dateAt(value);
+  if (period === "diario") return isSameDay(date, anchor);
+  if (period === "semanal") {
+    const diff = anchor.getTime() - date.getTime();
+    return diff >= 0 && diff <= 7 * 24 * 60 * 60 * 1000;
+  }
+  return isSameMonth(date, anchor);
+}
+
+function recalculateCashRegisters(state: CentralState, clinicId: string) {
+  const periods: CashRegister["period"][] = ["diario", "semanal", "mensual"];
+  const timestamp = new Date().toISOString();
+
+  periods.forEach((period) => {
+    const revenue = state.cashTransactions
+      .filter((transaction) => transaction.clinicId === clinicId && transaction.status === "completado" && isInsidePeriod(transaction.paidAt, period))
+      .reduce((total, transaction) => total + transaction.amount, 0);
+    const expenses = state.cashExpenses
+      .filter((expense) => expense.clinicId === clinicId && expense.status !== "pendiente" && isInsidePeriod(expense.paidAt, period))
+      .reduce((total, expense) => total + expense.amount, 0);
+    const pendingInvoices = state.pendingInvoices.filter((invoice) => invoice.clinicId === clinicId && invoice.status === "pendiente").length;
+    const register = state.cashRegisters.find((item) => item.clinicId === clinicId && item.period === period);
+
+    if (register) {
+      Object.assign(register, {
+        revenue,
+        expenses,
+        pendingInvoices,
+        currency: "CRC",
+        status: period === "diario" && pendingInvoices > 0 ? "requiere-revision" : "abierto",
+        updatedAt: timestamp
+      });
+    } else {
+      state.cashRegisters.push({
+        id: makeId("cash"),
+        clinicId,
+        period,
+        revenue,
+        expenses,
+        pendingInvoices,
+        currency: "CRC",
+        status: "abierto",
+        preparedBy: "Caja",
+        updatedAt: timestamp
+      });
+    }
+  });
+
+  const accountantReport = state.reports.find((report) => report.clinicId === clinicId && report.id === "rep-1");
+  const monthly = state.cashRegisters.find((register) => register.clinicId === clinicId && register.period === "mensual");
+  if (accountantReport && monthly) {
+    accountantReport.updatedAt = timestamp;
+    accountantReport.metrics = [
+      { label: "Ingresos", value: new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC", maximumFractionDigits: 0 }).format(monthly.revenue) },
+      { label: "Gastos", value: new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC", maximumFractionDigits: 0 }).format(monthly.expenses) },
+      { label: "Pendientes", value: String(monthly.pendingInvoices) }
+    ];
+  }
+}
+
 function ensureStateShape(state: RecoverableCentralState): CentralState {
   state.serviceCatalog ??= structuredClone(initialState.serviceCatalog);
   state.appointments ??= structuredClone(initialState.appointments);
+  state.cashTransactions ??= structuredClone(initialState.cashTransactions);
+  state.cashExpenses ??= structuredClone(initialState.cashExpenses);
+  state.pendingInvoices ??= structuredClone(initialState.pendingInvoices);
+  state.serviceCatalog = state.serviceCatalog.map((service) => normalizeService(service));
   state.staff = state.staff.map((member) => normalizeStaff(member));
   state.patients = state.patients.map((patient) => normalizePatient(patient));
   state.appointments = state.appointments.map((appointment) => normalizeAppointment(appointment));
+  state.cashRegisters = state.cashRegisters.map((register) => normalizeCashRegister(register));
+  state.cashTransactions = state.cashTransactions.map((transaction) => normalizeCashTransaction(transaction));
+  state.cashExpenses = state.cashExpenses.map((expense) => normalizeCashExpense(expense));
+  state.pendingInvoices = state.pendingInvoices.map((invoice) => normalizePendingInvoice(invoice));
   return state as CentralState;
 }
 
@@ -1070,6 +1409,9 @@ export function getStateForAccess(access: { allClinics: boolean; clinicIds: stri
     appointments: state.appointments.filter((item) => allowed.has(item.clinicId)),
     patients: state.patients.filter((item) => allowed.has(item.clinicId)),
     cashRegisters: state.cashRegisters.filter((item) => allowed.has(item.clinicId)),
+    cashTransactions: state.cashTransactions.filter((item) => allowed.has(item.clinicId)),
+    cashExpenses: state.cashExpenses.filter((item) => allowed.has(item.clinicId)),
+    pendingInvoices: state.pendingInvoices.filter((item) => allowed.has(item.clinicId)),
     reports: state.reports.filter((item) => allowed.has(item.clinicId)),
     automations: state.automations.filter((item) => allowed.has(item.clinicId))
   };
@@ -1134,7 +1476,7 @@ export function upsertAppointment(input: AppointmentUpsertInput) {
     patientName: patient?.name ?? input.patientName,
     serviceName: service?.name ?? input.serviceName,
     price: input.price ?? service?.price ?? 0,
-    currency: input.currency || service?.currency || "USD",
+    currency: input.currency || service?.currency || "CRC",
     doctorHonorarium: input.doctorHonorarium ?? service?.doctorHonorarium ?? 0,
     endsAt: input.endsAt || addMinutes(input.startsAt, service?.durationMinutes ?? 30),
     updatedAt: timestamp
@@ -1278,6 +1620,103 @@ export function approvePatientReport(input: {
   });
 
   return { patient, report, doctor };
+}
+
+export function upsertCashTransaction(input: CashTransactionInput) {
+  const state = getState();
+  const transaction = normalizeCashTransaction({
+    ...input,
+    id: input.id ?? makeId("pay"),
+    currency: "CRC"
+  });
+  const index = state.cashTransactions.findIndex((item) => item.id === transaction.id);
+
+  if (index >= 0) {
+    state.cashTransactions[index] = transaction;
+  } else {
+    state.cashTransactions.unshift(transaction);
+  }
+
+  if (transaction.status === "completado" && transaction.appointmentId) {
+    const appointment = state.appointments.find((item) => item.id === transaction.appointmentId && item.clinicId === transaction.clinicId);
+    if (appointment) {
+      appointment.paymentStatus = "pagado";
+      appointment.price = transaction.amount;
+      appointment.currency = "CRC";
+      appointment.updatedAt = new Date().toISOString();
+    }
+
+    state.pendingInvoices.forEach((invoice) => {
+      if (invoice.appointmentId === transaction.appointmentId && invoice.clinicId === transaction.clinicId) {
+        invoice.status = "pagada";
+      }
+    });
+  }
+
+  recalculateCashRegisters(state, transaction.clinicId);
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: transaction.clinicId,
+    type: "cash.payment.registered",
+    message: `Pago ${transaction.status} registrado por ${transaction.patientName} via ${transaction.method}.`,
+    at: new Date().toISOString()
+  });
+
+  return transaction;
+}
+
+export function upsertCashExpense(input: CashExpenseInput) {
+  const state = getState();
+  const expense = normalizeCashExpense({
+    ...input,
+    id: input.id ?? makeId("exp"),
+    currency: "CRC"
+  });
+  const index = state.cashExpenses.findIndex((item) => item.id === expense.id);
+
+  if (index >= 0) {
+    state.cashExpenses[index] = expense;
+  } else {
+    state.cashExpenses.unshift(expense);
+  }
+
+  recalculateCashRegisters(state, expense.clinicId);
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: expense.clinicId,
+    type: "cash.expense.registered",
+    message: `Gasto registrado: ${expense.description}.`,
+    at: new Date().toISOString()
+  });
+
+  return expense;
+}
+
+export function upsertPendingInvoice(input: PendingInvoiceInput) {
+  const state = getState();
+  const invoice = normalizePendingInvoice({
+    ...input,
+    id: input.id ?? makeId("inv"),
+    currency: "CRC"
+  });
+  const index = state.pendingInvoices.findIndex((item) => item.id === invoice.id);
+
+  if (index >= 0) {
+    state.pendingInvoices[index] = invoice;
+  } else {
+    state.pendingInvoices.unshift(invoice);
+  }
+
+  recalculateCashRegisters(state, invoice.clinicId);
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: invoice.clinicId,
+    type: "cash.invoice.registered",
+    message: `Factura pendiente registrada para ${invoice.patientName}.`,
+    at: new Date().toISOString()
+  });
+
+  return invoice;
 }
 
 export function patchTask(taskId: string, patch: Partial<AutomationTask>) {

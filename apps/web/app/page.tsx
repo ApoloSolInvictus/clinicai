@@ -44,12 +44,15 @@ import type { FormEvent, ReactNode } from "react";
 import type {
   AppointmentRecord,
   AutomationTemplate,
+  CashExpense,
   CashRegister,
+  CashTransaction,
   CentralState,
   DoctorSchedule,
   PatientInstruction,
   PatientRecord,
   PatientReport,
+  PendingInvoice,
   ReportSummary,
   ServiceCatalogItem,
   StaffMember,
@@ -153,6 +156,19 @@ const reportDeliveryStatusLabels: Record<AppointmentRecord["reportDeliveryStatus
   enviado: "Enviado"
 };
 
+const cashMethodLabels: Record<CashTransaction["method"], string> = {
+  efectivo: "Efectivo",
+  tarjeta: "Tarjeta",
+  sinpe: "SINPE",
+  transferencia: "Transferencia"
+};
+
+const cashPeriodLabels: Record<CashRegister["period"], string> = {
+  diario: "Diario",
+  semanal: "Semanal",
+  mensual: "Mensual"
+};
+
 const navItems: NavItem[] = [
   { id: "dashboard", icon: Activity, label: "Dashboard" },
   { id: "agenda", icon: CalendarDays, label: "Agenda" },
@@ -185,7 +201,7 @@ const intentLabels: Record<TaskIntent, string> = {
 };
 
 function money(value: number, currency: string) {
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(currency === "CRC" ? "es-CR" : "en-US", {
     style: "currency",
     currency,
     maximumFractionDigits: 0
@@ -323,7 +339,7 @@ function createEmptyAppointment(
     startsAt,
     endsAt: addMinutesToInput(startsAt, duration),
     price: service?.price ?? 0,
-    currency: service?.currency ?? "USD",
+    currency: service?.currency ?? "CRC",
     doctorHonorarium: service?.doctorHonorarium ?? 0,
     status: "solicitada",
     paymentStatus: "pendiente",
@@ -356,7 +372,7 @@ function createEmptyDoctor(clinicId: string): StaffMember {
     status: "activo",
     verifiedHoursMonth: 0,
     defaultHonorarium: 0,
-    currency: "USD",
+    currency: "CRC",
     paymentMethod: "Transferencia bancaria",
     serviceIds: [],
     signatureLabel: "",
@@ -394,6 +410,61 @@ type DoctorReportContext = {
   report: PatientReport;
 };
 
+function createEmptyPayment(clinicId: string, appointments: AppointmentRecord[]): CashTransaction {
+  const appointment = appointments.find((item) => item.paymentStatus === "pendiente") ?? appointments[0];
+
+  return {
+    id: "",
+    clinicId,
+    appointmentId: appointment?.id,
+    patientId: appointment?.patientId,
+    patientName: appointment?.patientName ?? "",
+    serviceName: appointment?.serviceName ?? "",
+    method: "sinpe",
+    amount: appointment?.price ?? 0,
+    currency: "CRC",
+    status: "completado",
+    reference: "",
+    receivedBy: "Caja",
+    paidAt: toLocalDateTimeInput(new Date()),
+    notes: ""
+  };
+}
+
+function createEmptyExpense(clinicId: string): CashExpense {
+  return {
+    id: "",
+    clinicId,
+    category: "empresa",
+    description: "",
+    amount: 0,
+    currency: "CRC",
+    method: "sinpe",
+    status: "registrado",
+    vendor: "",
+    paidAt: toLocalDateTimeInput(new Date()),
+    notes: ""
+  };
+}
+
+function createEmptyInvoice(clinicId: string, appointments: AppointmentRecord[]): PendingInvoice {
+  const appointment = appointments.find((item) => item.paymentStatus === "pendiente") ?? appointments[0];
+
+  return {
+    id: "",
+    clinicId,
+    appointmentId: appointment?.id,
+    patientId: appointment?.patientId,
+    patientName: appointment?.patientName ?? "",
+    concept: appointment?.serviceName ?? "",
+    amount: appointment?.price ?? 0,
+    currency: "CRC",
+    dueDate: new Date().toISOString().slice(0, 10),
+    status: "pendiente",
+    notes: ""
+  };
+}
+
 export default function Home() {
   const session = useFirebaseSession();
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
@@ -420,6 +491,9 @@ export default function Home() {
   const clinicAppointments = state?.appointments.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicPatients = state?.patients.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicCash = state?.cashRegisters.filter((item) => item.clinicId === clinicId) ?? [];
+  const clinicPayments = state?.cashTransactions.filter((item) => item.clinicId === clinicId) ?? [];
+  const clinicExpenses = state?.cashExpenses.filter((item) => item.clinicId === clinicId) ?? [];
+  const clinicInvoices = state?.pendingInvoices.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicReports = state?.reports.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicAutomations = state?.automations.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicEvents = state?.events.filter((item) => item.clinicId === clinicId).slice(0, 6) ?? [];
@@ -586,6 +660,64 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveCashRecord(
+    input:
+      | { type: "payment"; payment: CashTransaction }
+      | { type: "expense"; expense: CashExpense }
+      | { type: "invoice"; invoice: PendingInvoice }
+  ) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/cash", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify(input)
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo guardar el registro de caja.");
+      }
+
+      setState(payload.state);
+      setResult(JSON.stringify({ record: payload.record, saved: true }, null, 2));
+      return payload.record;
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo guardar el registro de caja.");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function prepareCashClose(period: CashRegister["period"]) {
+    const register = clinicCash.find((item) => item.period === period);
+    const completedPayments = clinicPayments.filter((payment) => payment.status === "completado");
+    const pendingInvoices = clinicInvoices.filter((invoice) => invoice.status === "pendiente");
+    const paidExpenses = clinicExpenses.filter((expense) => expense.status !== "pendiente");
+    const doctorPayments = clinicStaff
+      .filter((member) => member.role === "medico")
+      .map((doctor) => {
+        const paidAppointments = clinicAppointments.filter((appointment) => appointment.doctorId === doctor.id && appointment.paymentStatus !== "pendiente");
+        const serviceHonorarium = paidAppointments.reduce((total, appointment) => total + appointment.doctorHonorarium, 0);
+        const hourlyPay = doctor.verifiedHoursMonth * doctor.defaultHonorarium;
+        return `${doctor.name}: servicios ${money(serviceHonorarium, doctor.currency)}, horas ${money(hourlyPay, doctor.currency)}, total ${money(serviceHonorarium + hourlyPay, doctor.currency)}`;
+      })
+      .join("\n");
+
+    await sendTask({
+      clinicId,
+      intent: "contabilidad",
+      priority: period === "diario" ? "alta" : "critica",
+      prompt:
+        `Prepara cierre de caja ${period} en colones costarricenses para el contador. ` +
+        `Ingresos registrados: ${money(register?.revenue ?? 0, "CRC")}. Gastos: ${money(register?.expenses ?? 0, "CRC")}. ` +
+        `Facturas pendientes: ${pendingInvoices.length}. Pagos completados: ${completedPayments.length}. Gastos registrados: ${paidExpenses.length}. ` +
+        `Metodos de pago: efectivo ${completedPayments.filter((item) => item.method === "efectivo").length}, tarjeta ${completedPayments.filter((item) => item.method === "tarjeta").length}, SINPE ${completedPayments.filter((item) => item.method === "sinpe").length}. ` +
+        `Honorarios medicos:\n${doctorPayments || "Sin honorarios medicos registrados."}\n` +
+        "Devuelve un reporte contable con ingresos, egresos, facturas pendientes, honorarios medicos, gastos de empresa, alertas y resumen listo para contador. No cierres definitivamente sin aprobacion humana."
+    });
   }
 
   async function approveReportAndPrepareDelivery(input: {
@@ -1033,7 +1165,19 @@ export default function Home() {
               />
             ) : null}
             {activeModule === "caja" ? (
-              <CashModule cashRegisters={clinicCash} automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
+              <CashModule
+                cashRegisters={clinicCash}
+                payments={clinicPayments}
+                expenses={clinicExpenses}
+                invoices={clinicInvoices}
+                appointments={clinicAppointments}
+                staff={clinicStaff}
+                automations={clinicAutomations}
+                busy={busy}
+                onSaveCashRecord={saveCashRecord}
+                onPrepareCashClose={prepareCashClose}
+                onRunAutomation={runAutomation}
+              />
             ) : null}
             {activeModule === "reportes" ? <ReportsModule reports={clinicReports} /> : null}
             {activeModule === "automatizaciones" ? (
@@ -1334,8 +1478,8 @@ function AgendaModule({
             </div>
             <div className="row-metrics">
               <span>{selectedAppointments.length} citas</span>
-              <span>{money(agendaTotals.revenue, "USD")} agenda</span>
-              <span>{money(agendaTotals.honorarium, "USD")} honorarios</span>
+              <span>{money(agendaTotals.revenue, "CRC")} agenda</span>
+              <span>{money(agendaTotals.honorarium, "CRC")} honorarios</span>
             </div>
             <div className="button-row">
               <button className="btn" type="button" onClick={onPrepareAgendaReview} disabled={busy} title="Revisar agenda con OpenClaw">
@@ -2848,41 +2992,390 @@ function DoctorsModule({
 
 function CashModule({
   cashRegisters,
+  payments,
+  expenses,
+  invoices,
+  appointments,
+  staff,
   automations,
-  onRunAutomation,
-  busy
+  busy,
+  onSaveCashRecord,
+  onPrepareCashClose,
+  onRunAutomation
 }: {
   cashRegisters: CashRegister[];
+  payments: CashTransaction[];
+  expenses: CashExpense[];
+  invoices: PendingInvoice[];
+  appointments: AppointmentRecord[];
+  staff: StaffMember[];
   automations: AutomationTemplate[];
-  onRunAutomation: (template: AutomationTemplate) => void;
   busy: boolean;
+  onSaveCashRecord: (
+    input:
+      | { type: "payment"; payment: CashTransaction }
+      | { type: "expense"; expense: CashExpense }
+      | { type: "invoice"; invoice: PendingInvoice }
+  ) => Promise<unknown>;
+  onPrepareCashClose: (period: CashRegister["period"]) => void;
+  onRunAutomation: (template: AutomationTemplate) => void;
 }) {
   const cashAutomation = automations.find((item) => item.id === "auto-caja-diaria");
+  const clinicId = cashRegisters[0]?.clinicId ?? appointments[0]?.clinicId ?? staff[0]?.clinicId ?? "clinic-san-jose";
+  const [paymentDraft, setPaymentDraft] = useState<CashTransaction>(() => createEmptyPayment(clinicId, appointments));
+  const [expenseDraft, setExpenseDraft] = useState<CashExpense>(() => createEmptyExpense(clinicId));
+  const [invoiceDraft, setInvoiceDraft] = useState<PendingInvoice>(() => createEmptyInvoice(clinicId, appointments));
+  const completedPayments = payments.filter((payment) => payment.status === "completado");
+  const pendingInvoices = invoices.filter((invoice) => invoice.status === "pendiente");
+  const paidExpenses = expenses.filter((expense) => expense.status !== "pendiente");
+  const methodTotals = completedPayments.reduce(
+    (totals, payment) => ({
+      ...totals,
+      [payment.method]: totals[payment.method] + payment.amount
+    }),
+    { efectivo: 0, tarjeta: 0, sinpe: 0, transferencia: 0 } as Record<CashTransaction["method"], number>
+  );
+  const doctorPayouts = staff
+    .filter((member) => member.role === "medico")
+    .map((doctor) => {
+      const paidAppointments = appointments.filter((appointment) => appointment.doctorId === doctor.id && appointment.paymentStatus !== "pendiente");
+      const serviceHonorarium = paidAppointments.reduce((total, appointment) => total + appointment.doctorHonorarium, 0);
+      const hourlyPay = doctor.verifiedHoursMonth * doctor.defaultHonorarium;
+
+      return {
+        doctor,
+        serviceHonorarium,
+        hourlyPay,
+        total: serviceHonorarium + hourlyPay
+      };
+    });
+
+  useEffect(() => {
+    setPaymentDraft((current) => ({ ...current, clinicId }));
+    setExpenseDraft((current) => ({ ...current, clinicId }));
+    setInvoiceDraft((current) => ({ ...current, clinicId }));
+  }, [clinicId]);
+
+  function selectPaymentAppointment(appointmentId: string) {
+    const appointment = appointments.find((item) => item.id === appointmentId);
+    setPaymentDraft((current) => ({
+      ...current,
+      appointmentId: appointment?.id,
+      patientId: appointment?.patientId,
+      patientName: appointment?.patientName ?? current.patientName,
+      serviceName: appointment?.serviceName ?? current.serviceName,
+      amount: appointment?.price ?? current.amount,
+      currency: "CRC"
+    }));
+  }
+
+  function selectInvoiceAppointment(appointmentId: string) {
+    const appointment = appointments.find((item) => item.id === appointmentId);
+    setInvoiceDraft((current) => ({
+      ...current,
+      appointmentId: appointment?.id,
+      patientId: appointment?.patientId,
+      patientName: appointment?.patientName ?? current.patientName,
+      concept: appointment?.serviceName ?? current.concept,
+      amount: appointment?.price ?? current.amount,
+      currency: "CRC"
+    }));
+  }
+
+  async function submitPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSaveCashRecord({ type: "payment", payment: { ...paymentDraft, clinicId, currency: "CRC" } });
+    setPaymentDraft(createEmptyPayment(clinicId, appointments));
+  }
+
+  async function submitExpense(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSaveCashRecord({ type: "expense", expense: { ...expenseDraft, clinicId, currency: "CRC" } });
+    setExpenseDraft(createEmptyExpense(clinicId));
+  }
+
+  async function submitInvoice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onSaveCashRecord({ type: "invoice", invoice: { ...invoiceDraft, clinicId, currency: "CRC" } });
+    setInvoiceDraft(createEmptyInvoice(clinicId, appointments));
+  }
 
   return (
     <div className="grid">
-      <Panel icon={WalletCards} title="Cierres de caja">
-        <div className="cash-grid">
-          {cashRegisters.map((cash) => (
-            <div className="surface-block" key={cash.id}>
-              <strong>Cierre {cash.period}</strong>
-              <div className="mini-stat">
-                <span>Ingresos</span>
-                <b>{money(cash.revenue, cash.currency)}</b>
+      <Panel icon={WalletCards} title="Caja cajera">
+        <div className="cash-module">
+          <div className="cash-grid">
+            {cashRegisters.map((cash) => (
+              <div className="surface-block" key={cash.id}>
+                <div className="section-title-row">
+                  <strong>Cierre {cashPeriodLabels[cash.period]}</strong>
+                  <button className="btn" type="button" onClick={() => onPrepareCashClose(cash.period)} disabled={busy} title="Preparar cierre con OpenClaw">
+                    <Bot size={18} />
+                    Cierre
+                  </button>
+                </div>
+                <div className="mini-stat">
+                  <span>Ingresos</span>
+                  <b>{money(cash.revenue, "CRC")}</b>
+                </div>
+                <div className="mini-stat">
+                  <span>Gastos</span>
+                  <b>{money(cash.expenses, "CRC")}</b>
+                </div>
+                <div className="mini-stat">
+                  <span>Facturas pendientes</span>
+                  <b>{cash.pendingInvoices}</b>
+                </div>
+                <span className={`status-chip ${cash.status}`}>{cash.status}</span>
               </div>
-              <div className="mini-stat">
-                <span>Gastos</span>
-                <b>{money(cash.expenses, cash.currency)}</b>
+            ))}
+          </div>
+
+          <div className="cash-method-grid">
+            {Object.entries(methodTotals).map(([method, total]) => (
+              <div className="surface-block" key={method}>
+                <strong>{cashMethodLabels[method as CashTransaction["method"]]}</strong>
+                <div className="metric-value">{money(total, "CRC")}</div>
               </div>
-              <div className="mini-stat">
-                <span>Facturas pendientes</span>
-                <b>{cash.pendingInvoices}</b>
-              </div>
-              <span className={`status-chip ${cash.status}`}>{cash.status}</span>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </Panel>
+
+      <div className="cash-workspace">
+        <Panel icon={BadgeDollarSign} title="Registrar pago">
+          <form className="cash-form" onSubmit={submitPayment}>
+            <div className="appointment-form-grid">
+              <div className="field">
+                <label htmlFor="cash-appointment">Cita/servicio</label>
+                <select id="cash-appointment" value={paymentDraft.appointmentId ?? ""} onChange={(event) => selectPaymentAppointment(event.target.value)}>
+                  <option value="">Manual</option>
+                  {appointments.map((appointment) => (
+                    <option value={appointment.id} key={appointment.id}>
+                      {appointment.patientName} - {appointment.serviceName} - {money(appointment.price, "CRC")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="cash-patient">Paciente</label>
+                <input id="cash-patient" value={paymentDraft.patientName} onChange={(event) => setPaymentDraft((current) => ({ ...current, patientName: event.target.value }))} required />
+              </div>
+              <div className="field">
+                <label htmlFor="cash-service">Servicio</label>
+                <input id="cash-service" value={paymentDraft.serviceName} onChange={(event) => setPaymentDraft((current) => ({ ...current, serviceName: event.target.value }))} required />
+              </div>
+              <div className="field">
+                <label htmlFor="cash-method">Metodo</label>
+                <select id="cash-method" value={paymentDraft.method} onChange={(event) => setPaymentDraft((current) => ({ ...current, method: event.target.value as CashTransaction["method"] }))}>
+                  {Object.entries(cashMethodLabels).map(([value, label]) => (
+                    <option value={value} key={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="cash-amount">Monto colones</label>
+                <input id="cash-amount" type="number" min="0" value={paymentDraft.amount} onChange={(event) => setPaymentDraft((current) => ({ ...current, amount: Number(event.target.value) }))} required />
+              </div>
+              <div className="field">
+                <label htmlFor="cash-status">Estado</label>
+                <select id="cash-status" value={paymentDraft.status} onChange={(event) => setPaymentDraft((current) => ({ ...current, status: event.target.value as CashTransaction["status"] }))}>
+                  <option value="completado">Completado</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="anulado">Anulado</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="cash-reference">Referencia</label>
+                <input id="cash-reference" value={paymentDraft.reference} onChange={(event) => setPaymentDraft((current) => ({ ...current, reference: event.target.value }))} />
+              </div>
+              <div className="field">
+                <label htmlFor="cash-received-by">Recibido por</label>
+                <input id="cash-received-by" value={paymentDraft.receivedBy} onChange={(event) => setPaymentDraft((current) => ({ ...current, receivedBy: event.target.value }))} required />
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="cash-notes">Notas</label>
+              <textarea id="cash-notes" value={paymentDraft.notes} onChange={(event) => setPaymentDraft((current) => ({ ...current, notes: event.target.value }))} />
+            </div>
+            <button className="btn primary" type="submit" disabled={busy} title="Registrar pago">
+              <Save size={18} />
+              Registrar pago
+            </button>
+          </form>
+        </Panel>
+
+        <div className="grid">
+          <Panel icon={WalletCards} title="Gastos empresa">
+            <form className="cash-form" onSubmit={submitExpense}>
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="expense-description">Descripcion</label>
+                  <input id="expense-description" value={expenseDraft.description} onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="expense-category">Categoria</label>
+                  <select id="expense-category" value={expenseDraft.category} onChange={(event) => setExpenseDraft((current) => ({ ...current, category: event.target.value as CashExpense["category"] }))}>
+                    <option value="empresa">Empresa</option>
+                    <option value="medicos">Medicos</option>
+                    <option value="insumos">Insumos</option>
+                    <option value="servicios">Servicios</option>
+                    <option value="alquiler">Alquiler</option>
+                    <option value="otros">Otros</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="expense-amount">Monto colones</label>
+                  <input id="expense-amount" type="number" min="0" value={expenseDraft.amount} onChange={(event) => setExpenseDraft((current) => ({ ...current, amount: Number(event.target.value) }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="expense-method">Metodo</label>
+                  <select id="expense-method" value={expenseDraft.method} onChange={(event) => setExpenseDraft((current) => ({ ...current, method: event.target.value as CashExpense["method"] }))}>
+                    {Object.entries(cashMethodLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="expense-vendor">Proveedor</label>
+                  <input id="expense-vendor" value={expenseDraft.vendor} onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))} />
+                </div>
+                <div className="field">
+                  <label htmlFor="expense-status">Estado</label>
+                  <select id="expense-status" value={expenseDraft.status} onChange={(event) => setExpenseDraft((current) => ({ ...current, status: event.target.value as CashExpense["status"] }))}>
+                    <option value="registrado">Registrado</option>
+                    <option value="pagado">Pagado</option>
+                    <option value="pendiente">Pendiente</option>
+                  </select>
+                </div>
+              </div>
+              <button className="btn" type="submit" disabled={busy} title="Registrar gasto">
+                <Plus size={18} />
+                Registrar gasto
+              </button>
+            </form>
+          </Panel>
+
+          <Panel icon={FileClock} title="Facturas pendientes">
+            <form className="cash-form" onSubmit={submitInvoice}>
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="invoice-appointment">Cita</label>
+                  <select id="invoice-appointment" value={invoiceDraft.appointmentId ?? ""} onChange={(event) => selectInvoiceAppointment(event.target.value)}>
+                    <option value="">Manual</option>
+                    {appointments.map((appointment) => (
+                      <option value={appointment.id} key={appointment.id}>
+                        {appointment.patientName} - {appointment.serviceName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="invoice-patient">Paciente/cliente</label>
+                  <input id="invoice-patient" value={invoiceDraft.patientName} onChange={(event) => setInvoiceDraft((current) => ({ ...current, patientName: event.target.value }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="invoice-concept">Concepto</label>
+                  <input id="invoice-concept" value={invoiceDraft.concept} onChange={(event) => setInvoiceDraft((current) => ({ ...current, concept: event.target.value }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="invoice-amount">Monto colones</label>
+                  <input id="invoice-amount" type="number" min="0" value={invoiceDraft.amount} onChange={(event) => setInvoiceDraft((current) => ({ ...current, amount: Number(event.target.value) }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="invoice-due">Vence</label>
+                  <input id="invoice-due" type="date" value={invoiceDraft.dueDate} onChange={(event) => setInvoiceDraft((current) => ({ ...current, dueDate: event.target.value }))} />
+                </div>
+                <div className="field">
+                  <label htmlFor="invoice-status">Estado</label>
+                  <select id="invoice-status" value={invoiceDraft.status} onChange={(event) => setInvoiceDraft((current) => ({ ...current, status: event.target.value as PendingInvoice["status"] }))}>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="pagada">Pagada</option>
+                    <option value="vencida">Vencida</option>
+                  </select>
+                </div>
+              </div>
+              <button className="btn" type="submit" disabled={busy} title="Registrar factura">
+                <FilePlus2 size={18} />
+                Registrar factura
+              </button>
+            </form>
+          </Panel>
+        </div>
+      </div>
+
+      <div className="cash-support-grid">
+        <Panel icon={ClipboardList} title="Movimientos recientes">
+          <div className="surface-list">
+            {payments.slice(0, 6).map((payment) => (
+              <div className="surface-row" key={payment.id}>
+                <div>
+                  <strong>{payment.patientName}</strong>
+                  <p>
+                    {payment.serviceName} - {cashMethodLabels[payment.method]} - {payment.reference || "sin referencia"}
+                  </p>
+                </div>
+                <div className="row-metrics">
+                  <span>{money(payment.amount, "CRC")}</span>
+                  <span className={`status-chip ${payment.status}`}>{payment.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel icon={UserCog} title="Honorarios medicos">
+          <div className="surface-list">
+            {doctorPayouts.map((item) => (
+              <div className="surface-row" key={item.doctor.id}>
+                <div>
+                  <strong>{item.doctor.name}</strong>
+                  <p>
+                    Servicios {money(item.serviceHonorarium, "CRC")} - horas {money(item.hourlyPay, "CRC")}
+                  </p>
+                </div>
+                <span className="status-chip listo">{money(item.total, "CRC")}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel icon={FileClock} title="Pendientes contador">
+          <div className="surface-list">
+            {pendingInvoices.slice(0, 6).map((invoice) => (
+              <div className="surface-row" key={invoice.id}>
+                <div>
+                  <strong>{invoice.patientName}</strong>
+                  <p>
+                    {invoice.concept} - vence {invoice.dueDate}
+                  </p>
+                </div>
+                <span className={`status-chip ${invoice.status}`}>{money(invoice.amount, "CRC")}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel icon={WalletCards} title="Gastos registrados">
+          <div className="surface-list">
+            {paidExpenses.slice(0, 6).map((expense) => (
+              <div className="surface-row" key={expense.id}>
+                <div>
+                  <strong>{expense.description}</strong>
+                  <p>
+                    {expense.category} - {expense.vendor || "sin proveedor"}
+                  </p>
+                </div>
+                <span className={`status-chip ${expense.status}`}>{money(expense.amount, "CRC")}</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
 
       {cashAutomation ? (
         <Panel icon={BadgeDollarSign} title="Cierre automatizado">
