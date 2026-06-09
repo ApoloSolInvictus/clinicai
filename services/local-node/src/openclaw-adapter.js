@@ -66,9 +66,15 @@ function crc(value) {
 function detectPlaybook(task) {
   const prompt = String(task.prompt ?? "").toLowerCase();
 
+  if (task.intent === "agenda") return "agenda.audit";
+  if (task.intent === "correos") return "patient.reminders";
+  if (task.intent === "historial") return "clinical.approval";
+  if (task.intent === "gestion-local") return "operations.local_review";
   if (prompt.includes("cierre de caja diario")) return "cash.daily_close";
   if (prompt.includes("cierre de caja semanal") || prompt.includes("paquete semanal")) return "cash.weekly_package";
   if (prompt.includes("cierre de caja mensual")) return "cash.monthly_close";
+  if (task.intent === "contabilidad") return "cash.accounting_package";
+  if (task.intent === "sync") return "sync.batch";
   if (prompt.includes("auditoria de agenda") || prompt.includes("conflictos de agenda")) return "agenda.audit";
   if (prompt.includes("recordatorio") || prompt.includes("confirmacion")) return "patient.reminders";
   if (prompt.includes("reporte medico") || prompt.includes("recetario") || prompt.includes("aprobacion medica")) return "clinical.approval";
@@ -86,23 +92,128 @@ function compactModelRun(modelRun) {
   };
 }
 
+function asObject(value) {
+  return value && typeof value === "object" ? value : {};
+}
+
+function contextArray(context, key, fallback = []) {
+  const value = asObject(context)[key];
+  return Array.isArray(value) ? value : fallback;
+}
+
+function normalizeContextPatients(context, fallbackPatients) {
+  const patients = contextArray(context, "patients", fallbackPatients);
+  return patients.map((patient) => ({
+    ...patient,
+    email: patient.email ?? "",
+    whatsapp: patient.whatsapp ?? "",
+    risk: patient.risk ?? patient.riesgo ?? "bajo",
+    pendingDocuments: Array.isArray(patient.pendingDocuments) ? patient.pendingDocuments : [],
+    reports: Array.isArray(patient.reports) ? patient.reports : [],
+    instructions: Array.isArray(patient.instructions) ? patient.instructions : []
+  }));
+}
+
+function normalizeContextAppointments(context, fallbackAppointments, patients) {
+  const appointments = contextArray(context, "appointments", fallbackAppointments);
+  const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
+  const patientsByName = new Map(patients.map((patient) => [patient.name, patient]));
+
+  return appointments.map((appointment) => {
+    const patient = patientsById.get(appointment.patientId) ?? patientsByName.get(appointment.patientName) ?? {};
+    return {
+      ...appointment,
+      patientEmail: appointment.patientEmail ?? patient.email ?? "",
+      patientWhatsapp: appointment.patientWhatsapp ?? patient.whatsapp ?? "",
+      status: appointment.status === "solicitada" ? "needs-confirmation" : appointment.status,
+      reminderStatus: appointment.reminderStatus ?? "pendiente",
+      paymentStatus: appointment.paymentStatus ?? "pendiente",
+      price: Number(appointment.price ?? 0),
+      doctorHonorarium: Number(appointment.doctorHonorarium ?? 0)
+    };
+  });
+}
+
+function normalizeContextReports(context, patients, fallbackReports) {
+  const patientReports = patients.flatMap((patient) =>
+    (patient.reports ?? []).map((report) => ({
+      ...report,
+      patientId: patient.id,
+      patientName: patient.name,
+      doctorName: report.doctorName || patient.assignedDoctor || "Medico pendiente",
+      deliveryChannels: Array.isArray(report.deliveryChannels) ? report.deliveryChannels : ["email"],
+      medicalImages: Array.isArray(report.medicalImages) ? report.medicalImages : [],
+      status: report.status ?? "pendiente-aprobacion"
+    }))
+  );
+
+  return patientReports.length > 0 ? patientReports : fallbackReports;
+}
+
+function buildOperationalDb(task, localDb) {
+  const context = asObject(task.context);
+  const hasCentralContext = Object.keys(context).length > 0;
+  const patients = normalizeContextPatients(context, localDb.patients);
+  const appointments = normalizeContextAppointments(context, localDb.appointments, patients);
+
+  return {
+    ...localDb,
+    source: hasCentralContext ? "central-web-context" : "local-node-seed",
+    centralContextAt: typeof context.generatedAt === "string" ? context.generatedAt : null,
+    patients,
+    appointments,
+    staff: contextArray(context, "staff", localDb.staff),
+    schedules: contextArray(context, "schedules", []),
+    services: contextArray(context, "services", []),
+    payments: contextArray(context, "payments", localDb.payments),
+    expenses: contextArray(context, "expenses", localDb.expenses),
+    invoices: contextArray(context, "invoices", localDb.invoices),
+    cashRegisters: contextArray(context, "cashRegisters", []),
+    reports: normalizeContextReports(context, patients, localDb.reports),
+    centralEvents: contextArray(context, "events", [])
+  };
+}
+
 function buildModelPrompt(task, localDb, playbook) {
   const profile = intentProfiles[task.intent] ?? intentProfiles.sync;
   const snapshot = {
     clinicId: task.clinicId,
     playbook,
+    source: localDb.source ?? "local-node",
+    centralContextAt: localDb.centralContextAt ?? null,
     localCounts: {
       appointments: localDb.appointments.length,
       patients: localDb.patients.length,
+      staff: localDb.staff.length,
+      schedules: localDb.schedules?.length ?? 0,
+      services: localDb.services?.length ?? 0,
       payments: localDb.payments.length,
       expenses: localDb.expenses.length,
       pendingInvoices: localDb.invoices.filter((invoice) => invoice.status === "pendiente").length,
       reportsForApproval: localDb.reports.filter((report) => report.status === "pendiente-aprobacion").length
     },
+    patients: localDb.patients.slice(0, 8).map((patient) => ({
+      id: patient.id,
+      name: patient.name,
+      documentId: patient.documentId,
+      email: patient.email,
+      whatsapp: patient.whatsapp,
+      nextAppointment: patient.nextAppointment,
+      nextService: patient.nextService,
+      assignedDoctor: patient.assignedDoctor,
+      risk: patient.risk,
+      pendingDocuments: patient.pendingDocuments,
+      communication: patient.communication
+    })),
     appointments: localDb.appointments.slice(0, 8).map((appointment) => ({
       id: appointment.id,
+      patientId: appointment.patientId,
       patientName: appointment.patientName,
+      patientEmail: appointment.patientEmail,
+      patientWhatsapp: appointment.patientWhatsapp,
+      doctorId: appointment.doctorId,
       doctorName: appointment.doctorName,
+      serviceId: appointment.serviceId,
       serviceName: appointment.serviceName,
       startsAt: appointment.startsAt,
       endsAt: appointment.endsAt,
@@ -112,6 +223,18 @@ function buildModelPrompt(task, localDb, playbook) {
       price: appointment.price,
       doctorHonorarium: appointment.doctorHonorarium
     })),
+    staff: localDb.staff.slice(0, 8).map((member) => ({
+      id: member.id,
+      name: member.name,
+      role: member.role,
+      specialty: member.specialty,
+      status: member.status,
+      verifiedHoursMonth: member.verifiedHoursMonth,
+      defaultHonorarium: member.defaultHonorarium,
+      reportApprovalEnabled: member.reportApprovalEnabled
+    })),
+    schedules: (localDb.schedules ?? []).slice(0, 8),
+    services: (localDb.services ?? []).slice(0, 8),
     payments: localDb.payments.slice(0, 8),
     expenses: localDb.expenses.slice(0, 8),
     invoices: localDb.invoices.slice(0, 8),
@@ -126,6 +249,7 @@ function buildModelPrompt(task, localDb, playbook) {
     "Responde en espanol y devuelve JSON valido, sin Markdown.",
     "Nunca envies correos, WhatsApp, recetas o reportes medicos directamente; prepara borradores y marca aprobacion humana cuando aplique.",
     "Usa colones costarricenses (CRC) para caja, facturas, gastos y honorarios.",
+    "Usa el snapshot local recibido desde la Web App como fuente principal; si falta un dato, marca la accion como pendiente de revision humana.",
     "Incluye siempre: summary, actions, approvals, data, next_step.",
     `Salida esperada por modulo: ${profile.output}.`,
     `Modulo: ${task.intent}`,
@@ -468,12 +592,13 @@ function runDeterministicPlaybook(task, localDb, base) {
 }
 
 export async function runAutomation(task, localDb, config) {
+  const operationalDb = buildOperationalDb(task, localDb);
   const openclaw = await getOpenClawStatus(config);
   const playbook = detectPlaybook(task);
   let modelRun = null;
   let modelRunError = null;
   const shouldRunGateway = config.mode === "gateway" && openclaw.reachable && config.gatewayToken;
-  const modelPrompt = buildModelPrompt(task, localDb, playbook);
+  const modelPrompt = buildModelPrompt(task, operationalDb, playbook);
 
   if (config.runnerUrl) {
     try {
@@ -487,7 +612,7 @@ export async function runAutomation(task, localDb, config) {
           sessionId: toOpenClawSessionId(task.clinicId),
           message: modelPrompt
         }),
-        signal: AbortSignal.timeout(370_000)
+        signal: AbortSignal.timeout(config.runnerTimeoutMs ?? 120_000)
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -520,11 +645,13 @@ export async function runAutomation(task, localDb, config) {
     intent: task.intent,
     priority: task.priority ?? "normal",
     playbook,
+    dataSource: operationalDb.source,
+    centralContextAt: operationalDb.centralContextAt,
     openclaw,
     modelRun: compactModelRun(modelRun),
     modelRunError,
     completedAt: nowIso()
   };
 
-  return runDeterministicPlaybook(task, localDb, base);
+  return runDeterministicPlaybook(task, operationalDb, base);
 }

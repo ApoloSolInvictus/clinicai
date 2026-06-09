@@ -96,6 +96,17 @@ type TaskForm = {
   prompt: string;
 };
 
+type ExecutionState = {
+  status: "idle" | "running" | "completed" | "failed";
+  title: string;
+  message: string;
+  intent?: TaskIntent;
+  forwarded?: boolean;
+  source?: string;
+  taskId?: string;
+  updatedAt?: string;
+};
+
 type PatientChannel = "email" | "whatsapp";
 
 const reportTypeLabels: Record<PatientReport["type"], string> = {
@@ -465,6 +476,57 @@ function createEmptyInvoice(clinicId: string, appointments: AppointmentRecord[])
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function summarizeExecution(payload: unknown, fallbackIntent?: TaskIntent): ExecutionState {
+  const root = asRecord(payload);
+  const task = asRecord(root.task);
+  const localEnvelope = asRecord(root.result);
+  const run = asRecord(localEnvelope.result ?? root.result);
+  const openclaw = asRecord(run.openclaw);
+  const modelRun = asRecord(run.modelRun);
+  const forwarded = typeof root.forwarded === "boolean" ? root.forwarded : undefined;
+  const source =
+    typeof modelRun.finalText === "string"
+      ? "OpenClaw runner/gateway"
+      : typeof openclaw.status === "string"
+        ? `OpenClaw ${openclaw.status}`
+        : "OpenClaw playbook local";
+  const status = typeof task.status === "string" && task.status === "failed" ? "failed" : "completed";
+
+  return {
+    status,
+    title: status === "failed" ? "Ejecucion con error" : forwarded === false ? "Tarea en cola central" : "OpenClaw ejecuto la orden",
+    message:
+      typeof run.summary === "string"
+        ? run.summary
+        : typeof root.note === "string"
+          ? root.note
+          : typeof root.warning === "string"
+            ? root.warning
+            : "Tarea procesada; revisa la trazabilidad JSON para detalles.",
+    intent: (typeof task.intent === "string" ? task.intent : fallbackIntent) as TaskIntent | undefined,
+    forwarded,
+    source,
+    taskId: typeof task.id === "string" ? task.id : typeof run.taskId === "string" ? run.taskId : undefined,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function summarizeError(error: unknown, fallbackIntent?: TaskIntent): ExecutionState {
+  return {
+    status: "failed",
+    title: "OpenClaw no pudo ejecutar",
+    message: error instanceof Error ? error.message : "No se pudo completar la ejecucion.",
+    intent: fallbackIntent,
+    forwarded: false,
+    source: "API central",
+    updatedAt: new Date().toISOString()
+  };
+}
+
 export default function Home() {
   const session = useFirebaseSession();
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
@@ -472,6 +534,12 @@ export default function Home() {
   const [health, setHealth] = useState<HealthState | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("Listo para enviar una orden al nodo local.");
+  const [execution, setExecution] = useState<ExecutionState>({
+    status: "idle",
+    title: "OpenClaw listo",
+    message: "Presiona Ejecutar, Revisar, Recordatorios, Documentos o Cierre para enviar una orden al Docker local.",
+    source: "Web App central"
+  });
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -512,7 +580,8 @@ export default function Home() {
     });
   }
 
-  async function pingLocalNode(targetClinicId = clinicId) {
+  async function pingLocalNode(targetClinicId = clinicId, options: { updateResult?: boolean } = {}) {
+    const shouldUpdateResult = options.updateResult ?? true;
     try {
       const response = await fetch(`/api/local-health?clinicId=${encodeURIComponent(targetClinicId)}`, {
         headers: await session.getAuthHeaders(),
@@ -520,10 +589,14 @@ export default function Home() {
       });
       const payload = await response.json();
       setHealth(payload);
-      setResult(JSON.stringify(payload, null, 2));
+      if (shouldUpdateResult) {
+        setResult(JSON.stringify(payload, null, 2));
+      }
     } catch (error) {
       setHealth({ ok: false });
-      setResult(error instanceof Error ? error.message : "No se pudo consultar el nodo local.");
+      if (shouldUpdateResult) {
+        setResult(error instanceof Error ? error.message : "No se pudo consultar el nodo local.");
+      }
     }
   }
 
@@ -534,6 +607,26 @@ export default function Home() {
     prompt: string;
   }) {
     setBusy(true);
+    setExecution({
+      status: "running",
+      title: "Ejecutando con OpenClaw",
+      message: input.prompt,
+      intent: input.intent,
+      forwarded: undefined,
+      source: "Enviando al Docker local",
+      updatedAt: new Date().toISOString()
+    });
+    setResult(
+      JSON.stringify(
+        {
+          status: "running",
+          message: "Orden enviada desde la Web App central hacia OpenClaw.",
+          input
+        },
+        null,
+        2
+      )
+    );
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
@@ -541,9 +634,16 @@ export default function Home() {
         body: JSON.stringify(input)
       });
       const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? payload?.result?.error ?? `OpenClaw respondio HTTP ${response.status}`);
+      }
+
+      setExecution(summarizeExecution(payload, input.intent));
       setResult(JSON.stringify(payload, null, 2));
       await loadState();
+      await pingLocalNode(input.clinicId, { updateResult: false });
     } catch (error) {
+      setExecution(summarizeError(error, input.intent));
       setResult(error instanceof Error ? error.message : "No se pudo crear la tarea.");
     } finally {
       setBusy(false);
@@ -854,6 +954,14 @@ export default function Home() {
 
   async function syncNow() {
     setBusy(true);
+    setExecution({
+      status: "running",
+      title: "Sincronizando nodo local",
+      message: "Exportando eventos, caja, agenda y trazabilidad desde el Docker hacia la API central.",
+      intent: "sync",
+      source: "Nodo local",
+      updatedAt: new Date().toISOString()
+    });
     try {
       const response = await fetch("/api/sync", {
         method: "POST",
@@ -861,9 +969,25 @@ export default function Home() {
         body: JSON.stringify({ clinicId })
       });
       const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Sincronizacion respondio HTTP ${response.status}`);
+      }
+
+      const eventCount = Array.isArray(payload?.result?.events) ? payload.result.events.length : 0;
+      setExecution({
+        status: "completed",
+        title: "Sincronizacion completada",
+        message: `${eventCount} eventos locales sincronizados con la API central.`,
+        intent: "sync",
+        forwarded: true,
+        source: "Docker local",
+        updatedAt: new Date().toISOString()
+      });
       setResult(JSON.stringify(payload, null, 2));
       await loadState();
+      await pingLocalNode(clinicId, { updateResult: false });
     } catch (error) {
+      setExecution(summarizeError(error, "sync"));
       setResult(error instanceof Error ? error.message : "No se pudo sincronizar.");
     } finally {
       setBusy(false);
@@ -1085,7 +1209,7 @@ export default function Home() {
             </button>
             <button className="btn" onClick={syncNow} disabled={busy} title="Sincronizar eventos locales">
               <RefreshCw size={18} />
-              Sync
+              {busy ? "Sync..." : "Sync"}
             </button>
             <span className="status-pill profile-pill">
               <UserRound size={16} />
@@ -1114,6 +1238,8 @@ export default function Home() {
             </article>
           ))}
         </section>
+
+        <ExecutionPanel execution={execution} result={result} busy={busy} />
 
         <section className={`workspace-grid ${activeModule === "dashboard" ? "" : "workspace-grid-full"}`}>
           <div className="workspace-main">
@@ -1303,7 +1429,7 @@ function DashboardModule({
               </div>
               <button className="btn primary" onClick={() => onRunAutomation(template)} disabled={busy}>
                 <Play size={18} />
-                Ejecutar
+                {busy ? "Ejecutando" : "Ejecutar"}
               </button>
             </div>
           ))}
@@ -1507,7 +1633,7 @@ function AgendaModule({
             <div className="button-row">
               <button className="btn" type="button" onClick={onPrepareAgendaReview} disabled={busy} title="Revisar agenda con OpenClaw">
                 <Bot size={18} />
-                Revisar
+                {busy ? "Revisando" : "Revisar"}
               </button>
               <button className="btn primary" type="button" onClick={startNewAppointment} title="Nueva cita">
                 <Plus size={18} />
@@ -1593,7 +1719,7 @@ function AgendaModule({
                       title="Preparar recordatorio"
                     >
                       <Send size={18} />
-                      Recordatorio
+                      {busy ? "Preparando" : "Recordatorio"}
                     </button>
                   ) : null}
                   <button className="btn primary" type="submit" disabled={busy} title="Guardar cita">
@@ -1816,7 +1942,7 @@ function AgendaModule({
             </div>
             <button className="btn primary" onClick={() => onRunAutomation(agendaAutomation)} disabled={busy}>
               <Play size={18} />
-              Ejecutar
+              {busy ? "Ejecutando" : "Ejecutar"}
             </button>
           </div>
         </Panel>
@@ -2024,7 +2150,7 @@ function PatientsModule({
                       title="Preparar recordatorios"
                     >
                       <Send size={18} />
-                      Recordatorios
+                      {busy ? "Preparando" : "Recordatorios"}
                     </button>
                     <button
                       className="btn"
@@ -2034,7 +2160,7 @@ function PatientsModule({
                       title="Preparar documentos clinicos"
                     >
                       <FilePlus2 size={18} />
-                      Documentos
+                      {busy ? "Preparando" : "Documentos"}
                     </button>
                   </>
                 ) : null}
@@ -2983,7 +3109,7 @@ function DoctorsModule({
                   title="Aprobar reporte y preparar envio"
                 >
                   <ShieldCheck size={18} />
-                  Aprobar y preparar envio
+                  {busy ? "Preparando envio" : "Aprobar y preparar envio"}
                 </button>
               </div>
             ) : null}
@@ -3134,7 +3260,7 @@ function CashModule({
                   <strong>Cierre {cashPeriodLabels[cash.period]}</strong>
                   <button className="btn" type="button" onClick={() => onPrepareCashClose(cash.period)} disabled={busy} title="Preparar cierre con OpenClaw">
                     <Bot size={18} />
-                    Cierre
+                    {busy ? "Preparando" : "Cierre"}
                   </button>
                 </div>
                 <div className="mini-stat">
@@ -3409,7 +3535,7 @@ function CashModule({
             </div>
             <button className="btn primary" onClick={() => onRunAutomation(cashAutomation)} disabled={busy}>
               <Play size={18} />
-              Ejecutar
+              {busy ? "Ejecutando" : "Ejecutar"}
             </button>
           </div>
         </Panel>
@@ -3470,7 +3596,7 @@ function AutomationsModule({
             </div>
             <button className="btn primary" onClick={() => onRunAutomation(template)} disabled={busy}>
               <Play size={18} />
-              Ejecutar
+              {busy ? "Ejecutando" : "Ejecutar"}
             </button>
           </div>
         ))}
@@ -3521,6 +3647,56 @@ function SettingsModule({
         </div>
       </Panel>
     </div>
+  );
+}
+
+function ExecutionPanel({ execution, result, busy }: { execution: ExecutionState; result: string; busy: boolean }) {
+  const iconClass =
+    execution.status === "completed"
+      ? "icon-green"
+      : execution.status === "failed"
+        ? "icon-rose"
+        : execution.status === "running"
+          ? "icon-amber"
+          : "icon-indigo";
+  const statusLabel =
+    execution.status === "completed"
+      ? "completado"
+      : execution.status === "failed"
+        ? "fallo"
+        : execution.status === "running"
+          ? "ejecutando"
+          : "listo";
+
+  return (
+    <section className="execution-console" aria-label="Ultima ejecucion OpenClaw">
+      <div className="execution-summary">
+        <div className={`icon-tile ${iconClass}`}>
+          {execution.status === "completed" ? <CheckCircle2 size={20} /> : <Bot size={20} />}
+        </div>
+        <div>
+          <div className="execution-title-row">
+            <strong>{execution.title}</strong>
+            <span className={`status-chip ${statusLabel}`}>{busy ? "ejecutando" : statusLabel}</span>
+          </div>
+          <p>{execution.message}</p>
+          <div className="tag-row">
+            {execution.intent ? <span className="tag">{intentLabels[execution.intent]}</span> : null}
+            {execution.source ? <span className="tag">{execution.source}</span> : null}
+            {typeof execution.forwarded === "boolean" ? (
+              <span className={`status-chip ${execution.forwarded ? "online" : "pendiente"}`}>
+                {execution.forwarded ? "Docker conectado" : "En cola central"}
+              </span>
+            ) : null}
+            {execution.taskId ? <span className="tag">{execution.taskId}</span> : null}
+          </div>
+        </div>
+      </div>
+      <details className="execution-details">
+        <summary>Trazabilidad OpenClaw</summary>
+        <pre className="result-box">{result}</pre>
+      </details>
+    </section>
   );
 }
 
@@ -3615,7 +3791,7 @@ function CommandPanel({
 
         <button className="btn primary" onClick={onSubmit} disabled={busy} title="Enviar tarea al nodo local">
           <Play size={18} />
-          Ejecutar
+          {busy ? "Ejecutando" : "Ejecutar"}
         </button>
       </div>
     </Panel>

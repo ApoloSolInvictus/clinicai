@@ -13,6 +13,7 @@ const config = {
   gatewayUrl: process.env.OPENCLAW_GATEWAY_URL ?? "http://host.docker.internal:18789",
   gatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN ?? "",
   runnerUrl: process.env.OPENCLAW_RUNNER_URL ?? "",
+  runnerTimeoutMs: Number(process.env.OPENCLAW_RUNNER_TIMEOUT_MS ?? 30_000),
   token: process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token"
 };
 
@@ -208,6 +209,12 @@ app.post("/tasks", requireToken, async (request, response) => {
   response.json({
     accepted: true,
     clinicId: clinic.id,
+    taskId: task.id,
+    summary: result.summary,
+    playbook: result.playbook,
+    dataSource: result.dataSource,
+    openclawStatus: result.openclaw?.status,
+    modelRunError: result.modelRunError,
     result,
     sync: {
       pendingEvents: localDb.events.length,

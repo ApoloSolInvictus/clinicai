@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getClinicNodeConfig } from "@/lib/clinic-config";
-import { addEvent, createTask, patchClinic, patchTask } from "@/lib/data";
+import { addEvent, createTask, getState, patchClinic, patchTask } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const taskSchema = z.object({
@@ -12,6 +12,28 @@ const taskSchema = z.object({
 });
 
 export const maxDuration = 300;
+
+function buildLocalExecutionContext(clinicId: string) {
+  const state = getState();
+  const byClinic = <T extends { clinicId: string }>(items: T[]) => items.filter((item) => item.clinicId === clinicId);
+
+  return {
+    source: "openclinic-web-app",
+    generatedAt: new Date().toISOString(),
+    clinic: state.clinics.find((clinic) => clinic.id === clinicId) ?? null,
+    patients: byClinic(state.patients).slice(0, 50),
+    appointments: byClinic(state.appointments).slice(0, 75),
+    staff: byClinic(state.staff).slice(0, 50),
+    schedules: byClinic(state.schedules).slice(0, 80),
+    services: byClinic(state.serviceCatalog).slice(0, 50),
+    cashRegisters: byClinic(state.cashRegisters),
+    payments: byClinic(state.cashTransactions).slice(0, 100),
+    expenses: byClinic(state.cashExpenses).slice(0, 100),
+    invoices: byClinic(state.pendingInvoices).slice(0, 100),
+    reports: byClinic(state.reports),
+    events: byClinic(state.events).slice(0, 25)
+  };
+}
 
 export async function POST(request: Request) {
   const auth = await requireAuthenticatedUser(request);
@@ -32,6 +54,7 @@ export async function POST(request: Request) {
 
   const task = createTask(parsed.data);
   const node = getClinicNodeConfig(task.clinicId);
+  const context = buildLocalExecutionContext(task.clinicId);
 
   if (!node?.nodeUrl) {
     return NextResponse.json({
@@ -48,7 +71,7 @@ export async function POST(request: Request) {
         "content-type": "application/json",
         ...(node.token ? { authorization: `Bearer ${node.token}` } : {})
       },
-      body: JSON.stringify(task),
+      body: JSON.stringify({ ...task, context }),
       cache: "no-store",
       signal: AbortSignal.timeout(295_000)
     });

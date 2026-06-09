@@ -13,6 +13,7 @@ services:
       OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:18789}
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
       OPENCLAW_RUNNER_URL: ${OPENCLAW_RUNNER_URL:-http://host.docker.internal:18889/run}
+      OPENCLAW_RUNNER_TIMEOUT_MS: ${OPENCLAW_RUNNER_TIMEOUT_MS:-30000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
