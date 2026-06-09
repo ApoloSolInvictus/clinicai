@@ -20,30 +20,122 @@ const localDb = {
   appointments: [
     {
       id: "apt-1001",
-      patientName: "Paciente A",
-      patientEmail: "paciente-a@example.local",
+      patientName: "Maria Fernanda Rojas",
+      patientEmail: "maria.rojas@example.local",
+      patientWhatsapp: "+50688880101",
+      doctorName: "Dra. Elena Vargas",
+      serviceName: "Consulta general",
       startsAt: new Date(Date.now() + 86400000).toISOString(),
-      status: "needs-confirmation"
+      endsAt: new Date(Date.now() + 88200000).toISOString(),
+      status: "needs-confirmation",
+      reminderStatus: "pendiente",
+      paymentStatus: "pagado",
+      price: 37500,
+      doctorHonorarium: 22500
     },
     {
       id: "apt-1002",
-      patientName: "Paciente B",
-      patientEmail: "paciente-b@example.local",
+      patientName: "Jorge Alberto Mendez",
+      patientEmail: "jorge.mendez@example.local",
+      patientWhatsapp: "+50688880202",
+      doctorName: "Dr. Marco Solis",
+      serviceName: "Laboratorio y control",
       startsAt: new Date(Date.now() + 90000000).toISOString(),
-      status: "confirmed"
+      endsAt: new Date(Date.now() + 92700000).toISOString(),
+      status: "confirmed",
+      reminderStatus: "programado",
+      paymentStatus: "pagado",
+      price: 47500,
+      doctorHonorarium: 25000
     }
   ],
   patients: [
-    { id: "pat-1", lastVisit: "2026-06-01", risk: "low" },
-    { id: "pat-2", lastVisit: "2026-05-21", risk: "medium" }
+    { id: "pat-1", name: "Maria Fernanda Rojas", lastVisit: "2026-06-01", risk: "low" },
+    { id: "pat-2", name: "Jorge Alberto Mendez", lastVisit: "2026-05-21", risk: "medium" }
+  ],
+  staff: [
+    {
+      id: "staff-1",
+      name: "Dra. Elena Vargas",
+      role: "medico",
+      status: "activo",
+      verifiedHoursMonth: 128,
+      defaultHonorarium: 21000
+    },
+    {
+      id: "staff-2",
+      name: "Dr. Marco Solis",
+      role: "medico",
+      status: "activo",
+      verifiedHoursMonth: 96,
+      defaultHonorarium: 27500
+    },
+    { id: "staff-3", name: "Ana Rojas", role: "cajera", status: "activo" },
+    { id: "staff-4", name: "Laura Mendez", role: "recepcion", status: "activo" }
+  ],
+  payments: [
+    {
+      id: "pay-100",
+      appointmentId: "apt-1001",
+      patientName: "Maria Fernanda Rojas",
+      serviceName: "Consulta general",
+      method: "sinpe",
+      amount: 37500,
+      status: "completado"
+    },
+    {
+      id: "pay-101",
+      appointmentId: "apt-1002",
+      patientName: "Jorge Alberto Mendez",
+      serviceName: "Laboratorio y control",
+      method: "tarjeta",
+      amount: 47500,
+      status: "completado"
+    }
+  ],
+  expenses: [
+    { id: "exp-100", description: "Insumos medicos", category: "insumos", amount: 18000, status: "pagado" },
+    { id: "exp-101", description: "Mensajeria clinica", category: "servicios", amount: 4000, status: "registrado" }
+  ],
+  invoices: [
+    {
+      id: "inv-100",
+      patientName: "Sofia Camila Alvarez",
+      concept: "Seguimiento respiratorio",
+      amount: 45000,
+      status: "pendiente"
+    }
+  ],
+  reports: [
+    {
+      id: "rep-local-100",
+      patientName: "Maria Fernanda Rojas",
+      doctorName: "Dra. Elena Vargas",
+      status: "pendiente-aprobacion",
+      deliveryChannels: ["email", "whatsapp"],
+      medicalImages: ["signos-vitales-2026-06-05.png"]
+    },
+    {
+      id: "rep-local-101",
+      patientName: "Jorge Alberto Mendez",
+      doctorName: "Dr. Marco Solis",
+      status: "pendiente-aprobacion",
+      deliveryChannels: ["email"],
+      medicalImages: ["orden-laboratorio-borrador.pdf"]
+    }
+  ],
+  inventory: [
+    { id: "item-1", name: "Jeringas 5ml", stock: 12, minimum: 20 },
+    { id: "item-2", name: "Guantes talla M", stock: 80, minimum: 50 }
   ],
   accounting: {
-    revenueToday: 1275,
-    pendingInvoices: 8,
-    expensesMonth: 2410,
-    currency: "USD"
+    revenueToday: 85000,
+    pendingInvoices: 1,
+    expensesMonth: 22000,
+    currency: "CRC"
   },
   emailQueue: [],
+  whatsappQueue: [],
   events: [
     {
       id: "local-evt-seed",
@@ -92,7 +184,12 @@ app.get("/health", async (_request, response) => {
     localDb: {
       appointments: localDb.appointments.length,
       patients: localDb.patients.length,
+      payments: localDb.payments.length,
+      expenses: localDb.expenses.length,
+      pendingInvoices: localDb.invoices.filter((item) => item.status === "pendiente").length,
+      reportsForApproval: localDb.reports.filter((item) => item.status === "pendiente-aprobacion").length,
       queuedEmails: localDb.emailQueue.length,
+      queuedWhatsApps: localDb.whatsappQueue.length,
       events: localDb.events.length
     }
   });
@@ -128,6 +225,9 @@ app.post("/sync/now", requireToken, (_request, response) => {
     exportedAt: new Date().toISOString(),
     events,
     accounting: localDb.accounting,
+    payments: localDb.payments,
+    expenses: localDb.expenses,
+    invoices: localDb.invoices,
     appointments: {
       total: localDb.appointments.length,
       needsConfirmation: localDb.appointments.filter((item) => item.status === "needs-confirmation").length

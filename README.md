@@ -42,6 +42,19 @@ Usa `OPENCLAW_MODE=mock` solo como fallback sin dependencia externa.
 3. El nodo local ejecuta la automatizacion; si `OPENCLAW_RUNNER_URL` esta configurado, manda una orden real a OpenClaw y conserva trazabilidad compacta del modelo.
 4. La Web App consume eventos de sincronizacion para reportes, contabilidad y auditoria.
 
+## Playbooks OpenClaw
+
+El nodo local incluye playbooks entrenados para los botones `Ejecutar` de la Web App:
+
+- `agenda`: audita citas, conflictos, horarios medicos y recordatorios.
+- `correos`: prepara borradores Email/WhatsApp para revision humana.
+- `contabilidad`: prepara cierres diario, semanal o mensual en colones, con gastos, facturas y honorarios medicos.
+- `historial`: prepara reportes, recetas e indicaciones bloqueando envio hasta firma medica.
+- `gestion-local`: revisa personal, turnos, inventario y alertas internas.
+- `sync`: compacta eventos locales para sincronizacion central.
+
+Cuando el runner real de OpenClaw esta vivo, el playbook envia un snapshot compacto al modelo y conserva `modelRun` en la respuesta. Si el modelo o gateway no responden, el playbook local sigue devolviendo acciones trazables para que la demo no se detenga.
+
 ## Modulos operativos
 
 La primera version con login incluye menu para `Dashboard`, `Agenda`, `Pacientes`, `Medicos`, `Caja`, `Reportes`, `Automatizaciones` y `Configuracion`. Cada modulo lee datos filtrados por clinica y las plantillas de automatizacion envian tareas al Docker/OpenClaw local autorizado.
