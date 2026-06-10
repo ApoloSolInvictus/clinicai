@@ -4,6 +4,19 @@ import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } fr
 
 export const maxDuration = 10;
 
+function getNodeUrlHint(nodeUrl: string) {
+  try {
+    const url = new URL(nodeUrl);
+    if (url.protocol === "https:" && url.hostname.endsWith(".node") && !url.port) {
+      return "La URL usa HTTPS en puerto 443. En desarrollo local usa http://clinic-san-jose.node:8787; en Vercel/produccion configura un tunel o reverse proxy HTTPS que reenvie al nodo local.";
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 export async function GET(request: Request) {
   const auth = await requireAuthenticatedUser(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -45,7 +58,8 @@ export async function GET(request: Request) {
       clinicId: requestedClinicId,
       nodeUrl: node.nodeUrl,
       reachable: false,
-      error: error instanceof Error ? error.message : "No se pudo consultar el nodo local."
+      error: error instanceof Error ? error.message : "No se pudo consultar el nodo local.",
+      hint: getNodeUrlHint(node.nodeUrl)
     });
   }
 }

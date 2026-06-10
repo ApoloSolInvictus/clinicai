@@ -42,19 +42,19 @@ Para varias clinicas, usa `CLINIC_NODE_CONFIG_JSON`:
   "clinic-san-jose": {
     "name": "Clinica San Jose",
     "region": "Costa Rica",
-    "nodeUrl": "https://clinic-san-jose.node",
+    "nodeUrl": "http://clinic-san-jose.node:8787",
     "token": "token-de-esa-clinica"
   },
   "clinic-escazu": {
     "name": "Clinica Escazu",
     "region": "Costa Rica",
-    "nodeUrl": "https://clinic-escazu.node",
+    "nodeUrl": "http://clinic-escazu.node:8787",
     "token": "token-de-esa-clinica"
   }
 }
 ```
 
-Cada `nodeUrl` apunta al Docker local de esa clinica, normalmente por dominio `.node`, Cloudflare Tunnel, VPN, mTLS o reverse proxy seguro. Si el valor viene sin protocolo, la API central infiere `https://` para dominios como `clinic-san-jose.node` y `http://` para `localhost`, IPs o hosts con puerto como `clinic-san-jose.node:8787`.
+Cada `nodeUrl` apunta al Docker local de esa clinica. En desarrollo local con alias `.node`, usa el puerto del nodo como `http://clinic-san-jose.node:8787`. En produccion, usa `https://clinic-san-jose.node` solo si el dominio ya termina TLS y reenvia al nodo por Cloudflare Tunnel, VPN, mTLS o reverse proxy seguro. Si el valor viene sin protocolo, la API central infiere `https://` para dominios como `clinic-san-jose.node` y `http://` para `localhost`, IPs o hosts con puerto como `clinic-san-jose.node:8787`.
 
 ## 4. Claims de usuario
 

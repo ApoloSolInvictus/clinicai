@@ -29,7 +29,7 @@ npm run dev:web
 
 Copia `.env.example` a `.env.local` para la Web App o a `.env` para Compose segun el entorno.
 
-Para Vercel o produccion, `LOCAL_NODE_URL` y cada `nodeUrl` de `CLINIC_NODE_CONFIG_JSON` deben apuntar al dominio seguro del nodo, por ejemplo `https://clinic-san-jose.node`. Si escribes `clinic-san-jose.node` sin protocolo, la API central lo normaliza a HTTPS; si usas `localhost`, IP o `host:puerto`, lo trata como HTTP para desarrollo local.
+Para desarrollo local con alias `.node`, `LOCAL_NODE_URL` y cada `nodeUrl` de `CLINIC_NODE_CONFIG_JSON` deben apuntar al puerto del nodo, por ejemplo `http://clinic-san-jose.node:8787`. Para Vercel o produccion, usa `https://clinic-san-jose.node` solo si ese dominio ya termina TLS y reenvia al nodo por tunel, VPN o reverse proxy seguro. Si escribes `clinic-san-jose.node` sin protocolo, la API central lo normaliza a HTTPS; si usas `localhost`, IP o `host:puerto`, lo trata como HTTP para desarrollo local.
 
 La variable `OPENCLAW_MODE=gateway` conecta el nodo local con un Gateway real de OpenClaw. En esta maquina el Gateway se levanta desde Ubuntu WSL2 con Docker y queda en `http://127.0.0.1:18789`.
 
