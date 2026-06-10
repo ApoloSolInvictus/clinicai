@@ -49,6 +49,12 @@ En Vercel o produccion, la plantilla debe ser una URL publica HTTPS con tunel/pr
 CLINIC_NODE_URL_TEMPLATE=https://{clinicSlug}.nodes.tu-dominio.com
 ```
 
+Si hay un `CLINIC_NODE_CONFIG_JSON` viejo y necesitas forzar una URL publica desde Vercel, usa `CLINIC_NODE_PUBLIC_URL_TEMPLATE`; esta variable tiene prioridad sobre el JSON:
+
+```bash
+CLINIC_NODE_PUBLIC_URL_TEMPLATE=https://{clinicSlug}.nodes.tu-dominio.com
+```
+
 Para overrides por clinica, usa `CLINIC_NODE_CONFIG_JSON`:
 
 ```json

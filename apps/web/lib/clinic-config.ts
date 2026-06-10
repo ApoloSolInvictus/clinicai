@@ -81,6 +81,17 @@ function buildNodeUrlFromTemplate(clinicId: string) {
   const template = process.env.CLINIC_NODE_URL_TEMPLATE?.trim();
   if (!template) return "";
 
+  return buildNodeUrlFromRawTemplate(clinicId, template);
+}
+
+function buildNodeUrlFromPublicTemplate(clinicId: string) {
+  const template = process.env.CLINIC_NODE_PUBLIC_URL_TEMPLATE?.trim();
+  if (!template) return "";
+
+  return buildNodeUrlFromRawTemplate(clinicId, template);
+}
+
+function buildNodeUrlFromRawTemplate(clinicId: string, template: string) {
   const clinicSlug = toClinicSlug(clinicId);
   return normalizeNodeUrl(
     template
@@ -91,7 +102,7 @@ function buildNodeUrlFromTemplate(clinicId: string) {
 }
 
 function normalizeClinicConfig(id: string, value: RawClinicNodeConfig): ClinicNodeConfig | null {
-  const nodeUrl = normalizeNodeUrl(value.nodeUrl ?? "") || buildNodeUrlFromTemplate(id);
+  const nodeUrl = buildNodeUrlFromPublicTemplate(id) || normalizeNodeUrl(value.nodeUrl ?? "") || buildNodeUrlFromTemplate(id);
   if (!nodeUrl) return null;
 
   return {
@@ -124,7 +135,7 @@ function parseClinicConfigJson() {
 }
 
 function getTemplateClinicConfig(clinicId: string): ClinicNodeConfig | null {
-  const nodeUrl = buildNodeUrlFromTemplate(clinicId);
+  const nodeUrl = buildNodeUrlFromPublicTemplate(clinicId) || buildNodeUrlFromTemplate(clinicId);
   if (!nodeUrl) return null;
 
   return {
