@@ -27,6 +27,14 @@ Para una demo rapida, `LOCAL_NODE_URL` puede apuntar a un tunel HTTPS temporal h
 
 Si Vercel sigue mostrando `http://clinic-san-jose.node:8787`, revisa `CLINIC_NODE_CONFIG_JSON`: un JSON viejo puede estar sobreescribiendo la plantilla. Para una correccion rapida, define `CLINIC_NODE_PUBLIC_URL_TEMPLATE` con la URL HTTPS publica; esa variable tiene prioridad.
 
+Puedes validar que Vercel tomo la variable con:
+
+```text
+/api/node-config?clinicId=clinic-san-jose
+```
+
+Debe mostrar `cloudRuntime: true`, `hasPublicTemplate: true` y un `nodeUrl` HTTPS publico. Si `nodeUrl` sigue siendo `http://clinic-san-jose.node:8787`, la variable no quedo aplicada al entorno correcto o falta redeploy.
+
 Guia de Firebase: [firebase-auth.md](firebase-auth.md).
 
 ## Comandos CLI

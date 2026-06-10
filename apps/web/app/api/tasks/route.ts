@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getClinicNodeConfig } from "@/lib/clinic-config";
+import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
 import { addEvent, createTask, getState, patchClinic, patchTask } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
@@ -61,6 +61,28 @@ export async function POST(request: Request) {
       task,
       forwarded: false,
       note: "La clinica no tiene nodo local configurado; la tarea queda en cola central."
+    });
+  }
+
+  if (isCloudRuntime() && isLocalNodeUrl(node.nodeUrl)) {
+    const message = "La API central no puede alcanzar una URL local .node desde Vercel.";
+    const result = {
+      warning: message,
+      nodeUrl: node.nodeUrl,
+      hint: getLocalNodeUrlHint(node.nodeUrl)
+    };
+    const updatedTask = patchTask(task.id, { status: "sent-local", result }) ?? task;
+    patchClinic(task.clinicId, { status: "degraded" });
+    addEvent({
+      clinicId: task.clinicId,
+      type: "local.forward.pending",
+      message
+    });
+
+    return NextResponse.json({
+      task: updatedTask,
+      forwarded: false,
+      ...result
     });
   }
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getClinicNodeConfig } from "@/lib/clinic-config";
+import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
 import { addEvent, getState, patchClinic } from "@/lib/data";
 import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
@@ -16,6 +16,17 @@ export async function POST(request: Request) {
   const node = getClinicNodeConfig(clinicId);
   if (!node?.nodeUrl) {
     return NextResponse.json({ error: "La clinica no tiene nodo local configurado." }, { status: 400 });
+  }
+
+  if (isCloudRuntime() && isLocalNodeUrl(node.nodeUrl)) {
+    return NextResponse.json(
+      {
+        error: "La API central no puede sincronizar contra una URL local .node desde Vercel.",
+        nodeUrl: node.nodeUrl,
+        hint: getLocalNodeUrlHint(node.nodeUrl)
+      },
+      { status: 502 }
+    );
   }
 
   try {

@@ -77,6 +77,35 @@ export function normalizeNodeUrl(value: string) {
   }
 }
 
+export function isLocalNodeUrl(nodeUrl: string) {
+  try {
+    const url = new URL(nodeUrl);
+    return url.hostname.endsWith(".node") || url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+export function isCloudRuntime() {
+  return Boolean(process.env.VERCEL || process.env.AWS_REGION || process.env.NETLIFY || process.env.CF_PAGES);
+}
+
+export function getLocalNodeUrlHint(nodeUrl: string) {
+  try {
+    const url = new URL(nodeUrl);
+    if (url.protocol === "https:" && url.hostname.endsWith(".node") && !url.port) {
+      return "La URL usa HTTPS en puerto 443. En desarrollo local usa http://clinic-san-jose.node:8787; en Vercel/produccion configura CLINIC_NODE_PUBLIC_URL_TEMPLATE con un tunel o reverse proxy HTTPS que reenvie al nodo local.";
+    }
+    if (url.protocol === "http:" && url.hostname.endsWith(".node")) {
+      return "Esta URL .node es de desarrollo/local. Si la API corre en Vercel o en otro servidor, configura CLINIC_NODE_PUBLIC_URL_TEMPLATE con un dominio publico HTTPS que reenvie al nodo de cada clinica.";
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 function buildNodeUrlFromTemplate(clinicId: string) {
   const template = process.env.CLINIC_NODE_URL_TEMPLATE?.trim();
   if (!template) return "";

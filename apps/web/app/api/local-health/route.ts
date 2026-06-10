@@ -1,24 +1,8 @@
 import { NextResponse } from "next/server";
-import { getClinicNodeConfig } from "@/lib/clinic-config";
+import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
 import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 export const maxDuration = 10;
-
-function getNodeUrlHint(nodeUrl: string) {
-  try {
-    const url = new URL(nodeUrl);
-    if (url.protocol === "https:" && url.hostname.endsWith(".node") && !url.port) {
-      return "La URL usa HTTPS en puerto 443. En desarrollo local usa http://clinic-san-jose.node:8787; en Vercel/produccion configura un tunel o reverse proxy HTTPS que reenvie al nodo local.";
-    }
-    if (url.protocol === "http:" && url.hostname.endsWith(".node")) {
-      return "Esta URL .node es de desarrollo/local. Si la API corre en Vercel o en otro servidor, configura CLINIC_NODE_URL_TEMPLATE con un dominio publico HTTPS que reenvie al nodo de cada clinica.";
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
-}
 
 export async function GET(request: Request) {
   const auth = await requireAuthenticatedUser(request);
@@ -36,6 +20,17 @@ export async function GET(request: Request) {
       service: "lux-aeterna-central",
       clinicId: requestedClinicId,
       note: "La clinica no tiene nodo local configurado."
+    });
+  }
+
+  if (isCloudRuntime() && isLocalNodeUrl(node.nodeUrl)) {
+    return NextResponse.json({
+      ok: false,
+      clinicId: requestedClinicId,
+      nodeUrl: node.nodeUrl,
+      reachable: false,
+      error: "La API esta corriendo fuera de la red local y no puede alcanzar el nodo .node/local.",
+      hint: getLocalNodeUrlHint(node.nodeUrl)
     });
   }
 
@@ -62,7 +57,7 @@ export async function GET(request: Request) {
       nodeUrl: node.nodeUrl,
       reachable: false,
       error: error instanceof Error ? error.message : "No se pudo consultar el nodo local.",
-      hint: getNodeUrlHint(node.nodeUrl)
+      hint: getLocalNodeUrlHint(node.nodeUrl)
     });
   }
 }
