@@ -28,6 +28,26 @@ function stringArrayFromClaim(value: unknown) {
   return [];
 }
 
+function envIsTrue(value: string | undefined) {
+  return value === "true" || value === "1";
+}
+
+const localDevProfile: FirebaseUserProfile = {
+  uid: "local-dev",
+  email: "local-dev@example.local",
+  displayName: "Local Dev",
+  role: "platform-admin",
+  clinicIds: ["clinic-san-jose"],
+  allClinics: true
+};
+
+const localDevUser = {
+  uid: localDevProfile.uid,
+  email: localDevProfile.email,
+  displayName: localDevProfile.displayName,
+  getIdToken: async () => "local-dev"
+} as unknown as User;
+
 async function profileFromUser(user: User): Promise<FirebaseUserProfile> {
   const token = await getIdTokenResult(user);
   const role = typeof token.claims.role === "string" ? token.claims.role : "clinic-user";
@@ -51,13 +71,21 @@ async function profileFromUser(user: User): Promise<FirebaseUserProfile> {
 }
 
 export function useFirebaseSession() {
-  const configured = isFirebaseClientConfigured();
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<FirebaseUserProfile | null>(null);
+  const authDisabled = envIsTrue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DISABLED);
+  const configured = authDisabled || isFirebaseClientConfigured();
+  const [loading, setLoading] = useState(!authDisabled);
+  const [user, setUser] = useState<User | null>(authDisabled ? localDevUser : null);
+  const [profile, setProfile] = useState<FirebaseUserProfile | null>(authDisabled ? localDevProfile : null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authDisabled) {
+      setLoading(false);
+      setUser(localDevUser);
+      setProfile(localDevProfile);
+      return undefined;
+    }
+
     const auth = getFirebaseClientAuth();
     if (!auth) {
       setLoading(false);
@@ -71,9 +99,10 @@ export function useFirebaseSession() {
       setProfile(nextUser ? await profileFromUser(nextUser) : null);
       setLoading(false);
     });
-  }, []);
+  }, [authDisabled]);
 
   async function login(email: string, password: string) {
+    if (authDisabled) return;
     const auth = getFirebaseClientAuth();
     if (!auth) throw new Error("Firebase no esta configurado.");
     setError(null);
@@ -81,18 +110,21 @@ export function useFirebaseSession() {
   }
 
   async function logout() {
+    if (authDisabled) return;
     const auth = getFirebaseClientAuth();
     if (!auth) return;
     await signOut(auth);
   }
 
   async function resetPassword(email: string) {
+    if (authDisabled) return;
     const auth = getFirebaseClientAuth();
     if (!auth) throw new Error("Firebase no esta configurado.");
     await sendPasswordResetEmail(auth, email);
   }
 
-  async function getAuthHeaders() {
+  async function getAuthHeaders(): Promise<Record<string, string>> {
+    if (authDisabled) return {};
     if (!user) throw new Error("Sesion requerida.");
     const token = await user.getIdToken();
     return { authorization: `Bearer ${token}` };

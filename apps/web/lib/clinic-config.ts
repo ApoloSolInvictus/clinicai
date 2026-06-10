@@ -16,12 +16,47 @@ const fallbackClinic: ClinicNodeConfig = {
   id: process.env.FIREBASE_DEFAULT_CLINIC_ID ?? "clinic-san-jose",
   name: process.env.CLINIC_NAME ?? "Clinica San Jose",
   region: process.env.CLINIC_REGION ?? "Costa Rica",
-  nodeUrl: process.env.LOCAL_NODE_URL ?? "",
+  nodeUrl: normalizeNodeUrl(process.env.LOCAL_NODE_URL ?? ""),
   token: process.env.LOCAL_NODE_TOKEN
 };
 
+function hasUrlScheme(value: string) {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+function inferNodeUrlScheme(value: string) {
+  const authority = value.split(/[/?#]/, 1)[0] ?? "";
+  const host = authority.replace(/^\[/, "").split("]")[0].split(":")[0];
+
+  if (/^(localhost|127\.|0\.0\.0\.0|::1)$/i.test(host)) return "http";
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return "http";
+  if (/:\d+$/.test(authority)) return "http";
+
+  return "https";
+}
+
+export function normalizeNodeUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const rawUrl = hasUrlScheme(trimmed) ? trimmed : `${inferNodeUrlScheme(trimmed)}://${trimmed}`;
+
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.search = "";
+    url.hash = "";
+
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
 function normalizeClinicConfig(id: string, value: RawClinicNodeConfig): ClinicNodeConfig | null {
-  const nodeUrl = value.nodeUrl ?? "";
+  const nodeUrl = normalizeNodeUrl(value.nodeUrl ?? "");
   if (!nodeUrl) return null;
 
   return {

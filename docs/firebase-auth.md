@@ -42,19 +42,19 @@ Para varias clinicas, usa `CLINIC_NODE_CONFIG_JSON`:
   "clinic-san-jose": {
     "name": "Clinica San Jose",
     "region": "Costa Rica",
-    "nodeUrl": "https://clinic-san-jose-node.infiniti-ia.com",
+    "nodeUrl": "https://clinic-san-jose.node",
     "token": "token-de-esa-clinica"
   },
   "clinic-escazu": {
     "name": "Clinica Escazu",
     "region": "Costa Rica",
-    "nodeUrl": "https://clinic-escazu-node.infiniti-ia.com",
+    "nodeUrl": "https://clinic-escazu.node",
     "token": "token-de-esa-clinica"
   }
 }
 ```
 
-Cada `nodeUrl` apunta al Docker local de esa clinica, normalmente por Cloudflare Tunnel, VPN, mTLS o reverse proxy seguro.
+Cada `nodeUrl` apunta al Docker local de esa clinica, normalmente por dominio `.node`, Cloudflare Tunnel, VPN, mTLS o reverse proxy seguro. Si el valor viene sin protocolo, la API central infiere `https://` para dominios como `clinic-san-jose.node` y `http://` para `localhost`, IPs o hosts con puerto como `clinic-san-jose.node:8787`.
 
 ## 4. Claims de usuario
 
@@ -93,6 +93,7 @@ Para pruebas sin Firebase, puedes activar temporalmente:
 
 ```bash
 FIREBASE_AUTH_DISABLED=true
+NEXT_PUBLIC_FIREBASE_AUTH_DISABLED=true
 ```
 
 No uses esa variable en produccion.

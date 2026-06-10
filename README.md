@@ -29,6 +29,8 @@ npm run dev:web
 
 Copia `.env.example` a `.env.local` para la Web App o a `.env` para Compose segun el entorno.
 
+Para Vercel o produccion, `LOCAL_NODE_URL` y cada `nodeUrl` de `CLINIC_NODE_CONFIG_JSON` deben apuntar al dominio seguro del nodo, por ejemplo `https://clinic-san-jose.node`. Si escribes `clinic-san-jose.node` sin protocolo, la API central lo normaliza a HTTPS; si usas `localhost`, IP o `host:puerto`, lo trata como HTTP para desarrollo local.
+
 La variable `OPENCLAW_MODE=gateway` conecta el nodo local con un Gateway real de OpenClaw. En esta maquina el Gateway se levanta desde Ubuntu WSL2 con Docker y queda en `http://127.0.0.1:18789`.
 
 Para llamadas reales al modelo, `OPENCLAW_RUNNER_URL=http://host.docker.internal:18889/run` apunta al runner local de OpenClaw. Ese runner usa un archivo de entorno seguro en WSL (`/root/.openclaw-secrets/openai.env`) y no guarda la API key dentro del repositorio.
