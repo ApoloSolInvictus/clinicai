@@ -20,8 +20,30 @@ const fallbackClinic: ClinicNodeConfig = {
   token: process.env.LOCAL_NODE_TOKEN
 };
 
+function unique(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getConfiguredClinicIdList() {
+  return unique(
+    (process.env.CLINIC_NODE_IDS ?? process.env.CLINIC_IDS ?? "")
+      .split(",")
+      .map((item) => item.trim())
+  );
+}
+
 function hasUrlScheme(value: string) {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+function toClinicSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function inferNodeUrlScheme(value: string) {
@@ -55,8 +77,21 @@ export function normalizeNodeUrl(value: string) {
   }
 }
 
+function buildNodeUrlFromTemplate(clinicId: string) {
+  const template = process.env.CLINIC_NODE_URL_TEMPLATE?.trim();
+  if (!template) return "";
+
+  const clinicSlug = toClinicSlug(clinicId);
+  return normalizeNodeUrl(
+    template
+      .replaceAll("{clinicId}", clinicId)
+      .replaceAll("{clinicSlug}", clinicSlug)
+      .replaceAll("{clinic}", clinicSlug)
+  );
+}
+
 function normalizeClinicConfig(id: string, value: RawClinicNodeConfig): ClinicNodeConfig | null {
-  const nodeUrl = normalizeNodeUrl(value.nodeUrl ?? "");
+  const nodeUrl = normalizeNodeUrl(value.nodeUrl ?? "") || buildNodeUrlFromTemplate(id);
   if (!nodeUrl) return null;
 
   return {
@@ -88,18 +123,56 @@ function parseClinicConfigJson() {
   }
 }
 
+function getTemplateClinicConfig(clinicId: string): ClinicNodeConfig | null {
+  const nodeUrl = buildNodeUrlFromTemplate(clinicId);
+  if (!nodeUrl) return null;
+
+  return {
+    id: clinicId,
+    name: clinicId,
+    region: process.env.CLINIC_REGION ?? "Costa Rica",
+    nodeUrl,
+    token: process.env.LOCAL_NODE_TOKEN
+  };
+}
+
 export function getClinicNodeConfigs() {
   const configured = parseClinicConfigJson();
-  if (configured.length > 0) return configured;
+  const configuredIds = new Set(configured.map((clinic) => clinic.id));
+  const templateClinics = getConfiguredClinicIdList()
+    .filter((clinicId) => !configuredIds.has(clinicId))
+    .map((clinicId) => getTemplateClinicConfig(clinicId))
+    .filter((clinic): clinic is ClinicNodeConfig => Boolean(clinic));
+  const clinics = [...configured, ...templateClinics];
+
+  if (clinics.length > 0) return clinics;
+
+  const defaultTemplateClinic = getTemplateClinicConfig(fallbackClinic.id);
+  if (defaultTemplateClinic) return [defaultTemplateClinic];
+
   return fallbackClinic.nodeUrl ? [fallbackClinic] : [];
 }
 
 export function getClinicNodeConfig(clinicId: string) {
-  return getClinicNodeConfigs().find((clinic) => clinic.id === clinicId) ?? null;
+  return getClinicNodeConfigs().find((clinic) => clinic.id === clinicId) ?? getTemplateClinicConfig(clinicId);
 }
 
 export function getConfiguredClinicIds() {
-  return getClinicNodeConfigs().map((clinic) => clinic.id);
+  return unique([...getClinicNodeConfigs().map((clinic) => clinic.id), ...getConfiguredClinicIdList()]);
+}
+
+export function getPublicClinic(clinicId: string): Clinic | null {
+  const clinic = getClinicNodeConfig(clinicId);
+  if (!clinic) return null;
+
+  return {
+    id: clinic.id,
+    name: clinic.name,
+    region: clinic.region,
+    nodeUrl: clinic.nodeUrl || "pending-docker-node",
+    status: clinic.nodeUrl ? "degraded" : "offline",
+    lastSync: new Date().toISOString()
+  };
 }
 
 export function getPublicClinics(): Clinic[] {

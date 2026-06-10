@@ -35,7 +35,21 @@ La `FIREBASE_PRIVATE_KEY` debe quedar en una sola variable. Si viene con saltos 
 
 ## 3. Configurar nodos por clinica
 
-Para varias clinicas, usa `CLINIC_NODE_CONFIG_JSON`:
+Para altas rapidas, configura una plantilla general. La API reemplaza `{clinicId}` con el id exacto y `{clinicSlug}` / `{clinic}` con el slug seguro para dominio:
+
+```bash
+CLINIC_NODE_IDS=clinic-san-jose,clinic-escazu
+CLINIC_NODE_URL_TEMPLATE=http://{clinicSlug}.node:8787
+LOCAL_NODE_TOKEN=token-compartido-o-demo
+```
+
+En Vercel o produccion, la plantilla debe ser una URL publica HTTPS con tunel/proxy por clinica, por ejemplo:
+
+```bash
+CLINIC_NODE_URL_TEMPLATE=https://{clinicSlug}.nodes.tu-dominio.com
+```
+
+Para overrides por clinica, usa `CLINIC_NODE_CONFIG_JSON`:
 
 ```json
 {
@@ -54,7 +68,7 @@ Para varias clinicas, usa `CLINIC_NODE_CONFIG_JSON`:
 }
 ```
 
-Cada `nodeUrl` apunta al Docker local de esa clinica. En desarrollo local con alias `.node`, usa el puerto del nodo como `http://clinic-san-jose.node:8787`. En produccion, usa `https://clinic-san-jose.node` solo si el dominio ya termina TLS y reenvia al nodo por Cloudflare Tunnel, VPN, mTLS o reverse proxy seguro. Si el valor viene sin protocolo, la API central infiere `https://` para dominios como `clinic-san-jose.node` y `http://` para `localhost`, IPs o hosts con puerto como `clinic-san-jose.node:8787`.
+Cada `nodeUrl` apunta al Docker local de esa clinica. En desarrollo local con alias `.node`, usa el puerto del nodo como `http://clinic-san-jose.node:8787`. En produccion, usa HTTPS solo si el dominio ya termina TLS y reenvia al nodo por Cloudflare Tunnel, VPN, mTLS o reverse proxy seguro. Si el valor viene sin protocolo, la API central infiere `https://` para dominios como `clinic-san-jose.node` y `http://` para `localhost`, IPs o hosts con puerto como `clinic-san-jose.node:8787`.
 
 ## 4. Claims de usuario
 

@@ -16,11 +16,13 @@ Configura estas variables en `Production` y `Preview`:
 
 - `LOCAL_NODE_URL`: URL publica y segura del nodo local de la clinica, por ejemplo `https://clinic-san-jose.node` cuando hay tunel/proxy TLS. No uses `localhost` en Vercel.
 - `LOCAL_NODE_TOKEN`: token compartido para enviar tareas al nodo local.
-- `CLINIC_NODE_CONFIG_JSON`: configuracion multi-clinica con URL y token por Docker local.
+- `CLINIC_NODE_IDS`: lista separada por comas para publicar clinicas conocidas, por ejemplo `clinic-san-jose,clinic-escazu`.
+- `CLINIC_NODE_URL_TEMPLATE`: plantilla general para construir el dominio de cada nodo. Usa `https://{clinicSlug}.nodes.tu-dominio.com` en produccion o `http://{clinicSlug}.node:8787` solo en desarrollo local.
+- `CLINIC_NODE_CONFIG_JSON`: overrides multi-clinica con URL, nombre o token por Docker local.
 - `NEXT_PUBLIC_FIREBASE_*`: configuracion web de Firebase Auth.
 - `FIREBASE_*`: credenciales de Firebase Admin para verificar tokens.
 
-Para una demo rapida, `LOCAL_NODE_URL` puede apuntar a un tunel HTTPS temporal hacia `http://localhost:8787`. Para desarrollo local con archivo hosts, usa `http://clinic-san-jose.node:8787`. Para produccion, usa un dominio `.node`, VPN, mTLS, Cloudflare Tunnel, Tailscale Funnel, reverse proxy seguro o un modelo de pull donde el nodo local consulte tareas salientes. Si configuras `clinic-san-jose.node` sin protocolo, la app lo normaliza a `https://clinic-san-jose.node`, lo cual requiere que exista un listener HTTPS en 443.
+Para una demo rapida, `LOCAL_NODE_URL` puede apuntar a un tunel HTTPS temporal hacia `http://localhost:8787`. Para desarrollo local con archivo hosts, usa `http://clinic-san-jose.node:8787`. Para produccion, usa un dominio publico por clinica, VPN, mTLS, Cloudflare Tunnel, Tailscale Funnel, reverse proxy seguro o un modelo de pull donde el nodo local consulte tareas salientes. Si configuras `clinic-san-jose.node` sin protocolo, la app lo normaliza a `https://clinic-san-jose.node`, lo cual requiere que exista un listener HTTPS en 443.
 
 Guia de Firebase: [firebase-auth.md](firebase-auth.md).
 

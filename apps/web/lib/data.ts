@@ -1,4 +1,4 @@
-import { getPublicClinics } from "./clinic-config";
+import { getPublicClinic, getPublicClinics } from "./clinic-config";
 
 export type TaskIntent =
   | "agenda"
@@ -1397,9 +1397,15 @@ export function getStateForAccess(access: { allClinics: boolean; clinicIds: stri
   const state = getState();
   if (access.allClinics) return state;
   const allowed = new Set(access.clinicIds);
+  const clinics = state.clinics.filter((clinic) => allowed.has(clinic.id));
+  const existingClinicIds = new Set(clinics.map((clinic) => clinic.id));
+  const claimClinics = access.clinicIds
+    .filter((clinicId) => !existingClinicIds.has(clinicId))
+    .map((clinicId) => getPublicClinic(clinicId))
+    .filter((clinic): clinic is Clinic => Boolean(clinic));
 
   return {
-    clinics: state.clinics.filter((clinic) => allowed.has(clinic.id)),
+    clinics: [...clinics, ...claimClinics],
     tasks: state.tasks.filter((task) => allowed.has(task.clinicId)),
     events: state.events.filter((event) => allowed.has(event.clinicId)),
     roles: state.roles,
