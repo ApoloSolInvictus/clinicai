@@ -604,6 +604,25 @@ type DoctorReportContext = {
   report: PatientReport;
 };
 
+const newDictationReportId = "__new-dictation-report__";
+
+function createPostConsultationReport(patient: PatientRecord | undefined, doctor: StaffMember | undefined): PatientReport {
+  return {
+    id: newDictationReportId,
+    title: "Reporte post-consulta",
+    type: "reporte-medico",
+    status: "borrador",
+    doctorName: doctor?.name || patient?.assignedDoctor || "Medico pendiente",
+    createdAt: new Date().toISOString(),
+    summary: "",
+    prescription: "",
+    nextAppointment: patient?.nextAppointment ?? "",
+    medicalImages: [],
+    signedByDoctor: "",
+    deliveryChannels: patient?.communication?.whatsapp ? ["email", "whatsapp"] : ["email"]
+  };
+}
+
 function createEmptyPayment(clinicId: string, appointments: AppointmentRecord[]): CashTransaction {
   const appointment = appointments.find((item) => item.paymentStatus === "pendiente") ?? appointments[0];
 
@@ -2973,9 +2992,14 @@ function DoctorsModule({
   const visibleReports = reportContexts.filter(
     (item) => !draft.name || item.report.doctorName === draft.name || item.report.status === "pendiente-aprobacion"
   );
-  const [selectedReportId, setSelectedReportId] = useState(visibleReports[0]?.report.id ?? "");
-  const selectedReportContext = visibleReports.find((item) => item.report.id === selectedReportId) ?? visibleReports[0];
-  const [approvalChannels, setApprovalChannels] = useState<("email" | "whatsapp")[]>(selectedReportContext?.report.deliveryChannels ?? ["email"]);
+  const [selectedDictationPatientId, setSelectedDictationPatientId] = useState(patients[0]?.id ?? "");
+  const selectedDictationPatient = patients.find((patient) => patient.id === selectedDictationPatientId) ?? patients[0];
+  const selectedPatientReports = selectedDictationPatient?.reports ?? [];
+  const [selectedReportId, setSelectedReportId] = useState(selectedPatientReports[0]?.id ?? newDictationReportId);
+  const selectedReport =
+    selectedPatientReports.find((report) => report.id === selectedReportId) ?? createPostConsultationReport(selectedDictationPatient, draft);
+  const selectedReportContext = selectedDictationPatient ? { patient: selectedDictationPatient, report: selectedReport } : undefined;
+  const [approvalChannels, setApprovalChannels] = useState<("email" | "whatsapp")[]>(selectedReport.deliveryChannels ?? ["email"]);
 
   const doctorFinancials = useMemo(
     () =>
@@ -3002,6 +3026,21 @@ function DoctorsModule({
   }, [doctors, mode, selectedDoctorId]);
 
   useEffect(() => {
+    if (!selectedDictationPatientId || !patients.some((patient) => patient.id === selectedDictationPatientId)) {
+      setSelectedDictationPatientId(patients[0]?.id ?? "");
+    }
+  }, [patients, selectedDictationPatientId]);
+
+  useEffect(() => {
+    const reports = selectedDictationPatient?.reports ?? [];
+    if (selectedReportId === newDictationReportId) return;
+    if (!reports.some((report) => report.id === selectedReportId)) {
+      const pendingReport = reports.find((report) => report.status !== "aprobado" && report.status !== "enviado");
+      setSelectedReportId(pendingReport?.id ?? reports[0]?.id ?? newDictationReportId);
+    }
+  }, [selectedDictationPatient?.id, selectedDictationPatient?.reports, selectedReportId]);
+
+  useEffect(() => {
     if (mode === "new") {
       const empty = createEmptyDoctor(clinicId);
       setDraft(empty);
@@ -3017,7 +3056,7 @@ function DoctorsModule({
     if (selectedReportContext) {
       setApprovalChannels(selectedReportContext.report.deliveryChannels.length > 0 ? selectedReportContext.report.deliveryChannels : ["email"]);
     }
-  }, [selectedReportContext?.report.id]);
+  }, [selectedReportContext?.patient.id, selectedReportContext?.report.id]);
 
   function updateDraft<Key extends keyof StaffMember>(field: Key, value: StaffMember[Key]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -3291,36 +3330,49 @@ function DoctorsModule({
         </div>
       </Panel>
 
-      <div className="doctor-support-grid">
-        <Panel icon={Clock3} title="Reporte financiero medico">
-          <div className="surface-list">
-            {doctorFinancials.map((item) => (
-              <div className="surface-row" key={item.doctor.id}>
-                <div>
-                  <strong>{item.doctor.name}</strong>
-                  <p>
-                    {item.appointmentCount} citas - {item.doctor.verifiedHoursMonth} horas verificadas
-                  </p>
-                </div>
-                <div className="row-metrics">
-                  <span>{money(item.serviceHonorarium, item.doctor.currency)} servicios</span>
-                  <span>{money(item.hourlyPay, item.doctor.currency)} horas</span>
-                  <span className="status-chip listo">{money(item.total, item.doctor.currency)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Panel>
+      <Panel icon={FileText} title="Reportes medicos con voz">
+        <div className="medical-reports-workflow">
+          <aside className="medical-report-sidebar" aria-label="Seleccion de paciente y reporte medico">
+            <div className="field">
+              <label htmlFor="dictation-patient">Paciente atendido</label>
+              <select
+                id="dictation-patient"
+                value={selectedDictationPatient?.id ?? ""}
+                onChange={(event) => {
+                  setSelectedDictationPatientId(event.target.value);
+                  setSelectedReportId(newDictationReportId);
+                }}
+              >
+                {patients.map((patient) => (
+                  <option value={patient.id} key={patient.id}>
+                    {patient.name} - {patient.documentId || "sin documento"}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <Panel icon={FileText} title="Lector y aprobacion humana">
-          <div className="doctor-report-reader">
-            <div className="report-list">
+            <div className="field">
+              <label htmlFor="dictation-report-destination">Reporte destino</label>
+              <select id="dictation-report-destination" value={selectedReportId} onChange={(event) => setSelectedReportId(event.target.value)}>
+                <option value={newDictationReportId}>Nuevo reporte post-consulta</option>
+                {selectedPatientReports.map((report) => (
+                  <option value={report.id} key={report.id}>
+                    {report.title} - {reportStatusLabels[report.status]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="report-list medical-report-list">
               {visibleReports.map((item) => (
                 <button
                   className={`report-list-item ${selectedReportContext?.report.id === item.report.id ? "active" : ""}`}
                   type="button"
                   key={`${item.patient.id}-${item.report.id}`}
-                  onClick={() => setSelectedReportId(item.report.id)}
+                  onClick={() => {
+                    setSelectedDictationPatientId(item.patient.id);
+                    setSelectedReportId(item.report.id);
+                  }}
                 >
                   <strong>{item.report.title}</strong>
                   <span>{item.patient.name}</span>
@@ -3329,9 +3381,32 @@ function DoctorsModule({
               ))}
               {visibleReports.length === 0 ? <div className="empty-state">Sin reportes para revisar.</div> : null}
             </div>
+          </aside>
 
-            {selectedReportContext ? (
-              <div className="report-reader-panel">
+          {selectedReportContext ? (
+            <>
+              <MedicalDictationPanel
+                key={`${selectedReportContext.patient.id}-${selectedReportContext.report.id}`}
+                patient={selectedReportContext.patient}
+                report={selectedReportContext.report}
+                doctor={draft}
+                deliveryChannels={approvalChannels}
+                busy={busy}
+                onSave={(input) =>
+                  onSaveMedicalDictation({
+                    ...input,
+                    report: selectedReportId === newDictationReportId ? { ...input.report, id: newDictationReportId } : input.report
+                  }).then((savedReport) => {
+                    if (savedReport) {
+                      setSelectedReportId(savedReport.id);
+                    }
+                    return savedReport;
+                  })
+                }
+                onReview={onReviewMedicalDictation}
+              />
+
+              <div className="report-reader-panel medical-report-approval">
                 <div className="section-title-row">
                   <div>
                     <h3>{selectedReportContext.report.title}</h3>
@@ -3345,7 +3420,7 @@ function DoctorsModule({
                 </div>
                 <div className="reader-block">
                   <strong>Resumen clinico</strong>
-                  <p>{selectedReportContext.report.summary}</p>
+                  <p>{selectedReportContext.report.summary || "El dictado guardado aparecera aqui para revision."}</p>
                 </div>
                 <div className="reader-block">
                   <strong>Recetario e indicaciones</strong>
@@ -3378,19 +3453,16 @@ function DoctorsModule({
                     WhatsApp
                   </label>
                 </div>
-                <MedicalDictationPanel
-                  patient={selectedReportContext.patient}
-                  report={selectedReportContext.report}
-                  doctor={draft}
-                  deliveryChannels={approvalChannels}
-                  busy={busy}
-                  onSave={onSaveMedicalDictation}
-                  onReview={onReviewMedicalDictation}
-                />
                 <button
                   className="btn primary"
                   type="button"
-                  disabled={busy || !draft.id || !draft.reportApprovalEnabled || selectedReportContext.report.status === "aprobado"}
+                  disabled={
+                    busy ||
+                    !draft.id ||
+                    !draft.reportApprovalEnabled ||
+                    selectedReportContext.report.id === newDictationReportId ||
+                    selectedReportContext.report.status === "aprobado"
+                  }
                   onClick={() =>
                     onApproveReport({
                       patient: selectedReportContext.patient,
@@ -3405,10 +3477,32 @@ function DoctorsModule({
                   {busy ? "Preparando envio" : "Aprobar y preparar envio"}
                 </button>
               </div>
-            ) : null}
-          </div>
-        </Panel>
-      </div>
+            </>
+          ) : (
+            <div className="empty-state">Selecciona un paciente para iniciar el dictado medico.</div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel icon={Clock3} title="Reporte financiero medico">
+        <div className="surface-list">
+          {doctorFinancials.map((item) => (
+            <div className="surface-row" key={item.doctor.id}>
+              <div>
+                <strong>{item.doctor.name}</strong>
+                <p>
+                  {item.appointmentCount} citas - {item.doctor.verifiedHoursMonth} horas verificadas
+                </p>
+              </div>
+              <div className="row-metrics">
+                <span>{money(item.serviceHonorarium, item.doctor.currency)} servicios</span>
+                <span>{money(item.hourlyPay, item.doctor.currency)} horas</span>
+                <span className="status-chip listo">{money(item.total, item.doctor.currency)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
 
       <Panel icon={Clock3} title="Horas por pagar">
         <div className="surface-list">

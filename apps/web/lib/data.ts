@@ -1644,8 +1644,26 @@ export function updatePatientReportDraft(input: {
   const timestamp = new Date().toISOString();
   const patient = state.patients.find((item) => item.id === input.patientId && item.clinicId === input.clinicId);
   const doctor = state.staff.find((item) => item.id === input.doctorId && item.clinicId === input.clinicId);
-  const report = patient?.reports.find((item) => item.id === input.reportId);
-  if (!patient || !doctor || !report) return undefined;
+  if (!patient || !doctor) return undefined;
+
+  let report = patient.reports.find((item) => item.id === input.reportId);
+  if (!report) {
+    report = {
+      id: makeId("rep"),
+      title: input.title.trim() || "Reporte post-consulta",
+      type: "reporte-medico",
+      status: "borrador",
+      doctorName: doctor.name,
+      createdAt: timestamp,
+      summary: "",
+      prescription: "",
+      nextAppointment: patient.nextAppointment,
+      medicalImages: [],
+      signedByDoctor: "",
+      deliveryChannels: input.deliveryChannels.length > 0 ? input.deliveryChannels : ["email"]
+    };
+    patient.reports.unshift(report);
+  }
 
   report.title = input.title.trim() || report.title;
   report.summary = input.summary.trim();

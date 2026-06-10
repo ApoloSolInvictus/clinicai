@@ -904,6 +904,27 @@ h1 {
   grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
 }
 
+.medical-reports-workflow {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1.55fr) minmax(300px, 0.85fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.medical-report-sidebar,
+.medical-report-list,
+.medical-report-approval {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.medical-report-list {
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .report-reader-panel {
   padding: 12px;
   border: 1px solid var(--line);
@@ -938,6 +959,7 @@ h1 {
 .dictation-panel {
   display: grid;
   gap: 12px;
+  min-width: 0;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2090,6 +2112,7 @@ body::-webkit-scrollbar-thumb {
   .doctor-workspace,
   .doctor-support-grid,
   .doctor-report-reader,
+  .medical-reports-workflow,
   .doctor-service-grid,
   .patient-context-grid,
   .schedule-editor-row,
