@@ -553,6 +553,7 @@ h1 {
 .status-chip.activo,
 .status-chip.verificado,
 .status-chip.listo-contador,
+.status-chip.cerrado,
 .status-chip.listo,
 .status-chip.confirmada,
 .status-chip.completada,
@@ -614,6 +615,28 @@ h1 {
   border-color: rgba(79, 70, 229, 0.2);
   color: var(--indigo);
   background: rgba(79, 70, 229, 0.08);
+}
+
+.status-action {
+  cursor: pointer;
+  appearance: none;
+}
+
+.status-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.status-action:hover,
+.actionable-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(13, 148, 136, 0.38);
+}
+
+.actionable-card {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
 }
 
 .approval-pill {
@@ -1251,10 +1274,69 @@ h1 {
   gap: 12px;
 }
 
+.accounting-module,
 .cash-module,
 .cash-form {
   display: grid;
   gap: 14px;
+}
+
+.accounting-period-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.accounting-period {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.accounting-period.active,
+.report-row.active {
+  border-color: rgba(13, 148, 136, 0.48);
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.accounting-detail {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.accounting-ledger-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(13, 148, 136, 0.06);
+}
+
+.segmented-control button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.segmented-control button.active {
+  background: var(--teal);
+  color: #fff;
 }
 
 .cash-method-grid {
@@ -1717,6 +1799,7 @@ h3,
 .status-chip.activo,
 .status-chip.verificado,
 .status-chip.listo-contador,
+.status-chip.cerrado,
 .status-chip.listo,
 .status-chip.confirmada,
 .status-chip.completada,
@@ -1790,7 +1873,9 @@ h3,
 .appointment-card.active,
 .doctor-list-item.active,
 .report-list-item.active,
-.patient-list-item.active {
+.patient-list-item.active,
+.accounting-period.active,
+.report-row.active {
   border-color: rgba(125, 211, 252, 0.48);
   background:
     linear-gradient(160deg, rgba(14, 165, 233, 0.2), rgba(37, 99, 235, 0.12)),
@@ -2118,6 +2203,8 @@ body::-webkit-scrollbar-thumb {
   .schedule-editor-row,
   .patient-workspace,
   .patient-form-grid-compact,
+  .accounting-period-grid,
+  .accounting-ledger-grid,
   .cash-workspace,
   .cash-support-grid,
   .cash-method-grid,
@@ -2173,6 +2260,9 @@ body::-webkit-scrollbar-thumb {
   .appointment-form-grid,
   .patient-form-grid,
   .patient-form-grid-compact,
+  .accounting-period-grid,
+  .accounting-ledger-grid,
+  .segmented-control,
   .cash-method-grid,
   .cash-support-grid,
   .cash-grid,

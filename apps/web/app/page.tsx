@@ -112,6 +112,31 @@ type ExecutionState = {
 
 type PatientChannel = "email" | "whatsapp";
 
+type WorkFocus =
+  | { module: "agenda"; kind: "appointment"; appointmentId?: string; date?: string }
+  | { module: "pacientes"; kind: "patient" | "patient-report" | "patient-instruction"; patientId?: string; reportId?: string; instructionId?: string }
+  | { module: "medicos"; kind: "doctor" | "medical-report"; doctorId?: string; patientId?: string; reportId?: string }
+  | { module: "caja"; kind: "payment" | "expense" | "invoice" | "close"; id?: string; period?: CashRegister["period"] }
+  | { module: "reportes"; kind: "report"; reportId?: string }
+  | { module: "automatizaciones"; kind: "automation"; automationId?: string };
+
+type CashDeskSection = "payment" | "expense" | "invoice";
+
+type AccountingPeriodSummary = {
+  period: CashRegister["period"];
+  register?: CashRegister;
+  revenue: number;
+  expenses: number;
+  net: number;
+  pendingInvoices: number;
+  pendingInvoiceTotal: number;
+  doctorHonorarium: number;
+  paymentsCount: number;
+  expensesCount: number;
+  methodTotals: Record<CashTransaction["method"], number>;
+  status: CashRegister["status"];
+};
+
 type SpeechRecognitionAlternativeLike = {
   transcript: string;
 };
@@ -678,6 +703,94 @@ function createEmptyInvoice(clinicId: string, appointments: AppointmentRecord[])
   };
 }
 
+function parseCashDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function sameAccountingDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+}
+
+function isInsideAccountingPeriod(value: string, period: CashRegister["period"], anchor = new Date()) {
+  const date = parseCashDate(value);
+  if (period === "diario") return sameAccountingDay(date, anchor);
+  if (period === "semanal") {
+    const diff = anchor.getTime() - date.getTime();
+    return diff >= 0 && diff <= 7 * 24 * 60 * 60 * 1000;
+  }
+  return date.getFullYear() === anchor.getFullYear() && date.getMonth() === anchor.getMonth();
+}
+
+function emptyMethodTotals(): Record<CashTransaction["method"], number> {
+  return { efectivo: 0, tarjeta: 0, sinpe: 0, transferencia: 0 };
+}
+
+function buildAccountingSummaries({
+  cashRegisters,
+  payments,
+  expenses,
+  invoices,
+  appointments,
+  staff
+}: {
+  cashRegisters: CashRegister[];
+  payments: CashTransaction[];
+  expenses: CashExpense[];
+  invoices: PendingInvoice[];
+  appointments: AppointmentRecord[];
+  staff: StaffMember[];
+}): AccountingPeriodSummary[] {
+  const periods: CashRegister["period"][] = ["diario", "semanal", "mensual"];
+
+  return periods.map((period) => {
+    const periodPayments = payments.filter(
+      (payment) => payment.status === "completado" && isInsideAccountingPeriod(payment.paidAt, period)
+    );
+    const periodExpenses = expenses.filter(
+      (expense) => expense.status !== "pendiente" && isInsideAccountingPeriod(expense.paidAt, period)
+    );
+    const periodAppointments = appointments.filter(
+      (appointment) => appointment.paymentStatus !== "pendiente" && isInsideAccountingPeriod(appointment.startsAt, period)
+    );
+    const revenue = periodPayments.reduce((total, payment) => total + payment.amount, 0);
+    const expenseTotal = periodExpenses.reduce((total, expense) => total + expense.amount, 0);
+    const pendingPeriodInvoices = invoices.filter(
+      (invoice) => invoice.status === "pendiente" && isInsideAccountingPeriod(invoice.dueDate, period)
+    );
+    const methodTotals = periodPayments.reduce((totals, payment) => {
+      totals[payment.method] += payment.amount;
+      return totals;
+    }, emptyMethodTotals());
+    const doctorHonorarium = staff
+      .filter((member) => member.role === "medico")
+      .reduce((total, doctor) => {
+        const services = periodAppointments
+          .filter((appointment) => appointment.doctorId === doctor.id)
+          .reduce((sum, appointment) => sum + appointment.doctorHonorarium, 0);
+        const hourly = period === "mensual" ? doctor.verifiedHoursMonth * doctor.defaultHonorarium : 0;
+        return total + services + hourly;
+      }, 0);
+    const register = cashRegisters.find((item) => item.period === period);
+    const pendingInvoices = register?.pendingInvoices ?? pendingPeriodInvoices.length;
+
+    return {
+      period,
+      register,
+      revenue: register?.revenue ?? revenue,
+      expenses: register?.expenses ?? expenseTotal,
+      net: (register?.revenue ?? revenue) - (register?.expenses ?? expenseTotal),
+      pendingInvoices,
+      pendingInvoiceTotal: pendingPeriodInvoices.reduce((total, invoice) => total + invoice.amount, 0),
+      doctorHonorarium,
+      paymentsCount: periodPayments.length,
+      expensesCount: periodExpenses.length,
+      methodTotals,
+      status: register?.status ?? (pendingInvoices > 0 ? "requiere-revision" : "abierto")
+    };
+  });
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
@@ -732,6 +845,7 @@ function summarizeError(error: unknown, fallbackIntent?: TaskIntent): ExecutionS
 export default function Home() {
   const session = useFirebaseSession();
   const [activeModule, setActiveModule] = useState<ModuleId>("dashboard");
+  const [workFocus, setWorkFocus] = useState<WorkFocus | null>(null);
   const [state, setState] = useState<CentralState | null>(null);
   const [health, setHealth] = useState<HealthState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -856,6 +970,11 @@ export default function Home() {
     await sendTask(form);
   }
 
+  function navigateToWork(focus: WorkFocus) {
+    setWorkFocus(focus);
+    setActiveModule(focus.module);
+  }
+
   async function savePatient(patient: PatientRecord) {
     setBusy(true);
     try {
@@ -969,6 +1088,7 @@ export default function Home() {
       | { type: "payment"; payment: CashTransaction }
       | { type: "expense"; expense: CashExpense }
       | { type: "invoice"; invoice: PendingInvoice }
+      | { type: "register"; register: CashRegister }
   ) {
     setBusy(true);
     try {
@@ -1315,31 +1435,36 @@ export default function Home() {
         icon: Bot,
         label: "Nodo OpenClaw",
         value: health?.ok ? "Online" : "Pendiente",
-        className: "icon-indigo"
+        className: "icon-indigo",
+        focus: { module: "automatizaciones", kind: "automation" } satisfies WorkFocus
       },
       {
         icon: BadgeDollarSign,
         label: "Caja diaria",
         value: dailyCash ? money(dailyCash.revenue, dailyCash.currency) : "$0",
-        className: "icon-teal"
+        className: "icon-teal",
+        focus: { module: "caja", kind: "close", period: "diario" } satisfies WorkFocus
       },
       {
         icon: FileText,
         label: "Docs pendientes",
         value: String(pendingDocuments),
-        className: "icon-amber"
+        className: "icon-amber",
+        focus: { module: "medicos", kind: "medical-report" } satisfies WorkFocus
       },
       {
         icon: Clock3,
         label: "Horas verificadas",
         value: String(verifiedHours),
-        className: "icon-rose"
+        className: "icon-rose",
+        focus: { module: "medicos", kind: "doctor" } satisfies WorkFocus
       },
       {
         icon: CheckCircle2,
         label: "Tareas completas",
         value: String(completed),
-        className: "icon-green"
+        className: "icon-green",
+        focus: { module: "automatizaciones", kind: "automation" } satisfies WorkFocus
       }
     ];
   }, [clinicCash, clinicPatients, clinicStaff, health?.ok, state?.tasks]);
@@ -1504,7 +1629,13 @@ export default function Home() {
 
         <section className="grid metrics metrics-five" aria-label="Indicadores">
           {metrics.map((metric) => (
-            <article className="card metric" key={metric.label}>
+            <button
+              className="card metric actionable-card"
+              key={metric.label}
+              type="button"
+              onClick={() => navigateToWork(metric.focus)}
+              title={`Ir a ${metric.label}`}
+            >
               <div className="metric-header">
                 <div className={`icon-tile ${metric.className}`}>
                   <metric.icon size={20} />
@@ -1515,7 +1646,7 @@ export default function Home() {
                 <div className="metric-value">{metric.value}</div>
                 <div className="metric-label">{metric.label}</div>
               </div>
-            </article>
+            </button>
           ))}
         </section>
 
@@ -1528,6 +1659,7 @@ export default function Home() {
                 automations={clinicAutomations}
                 events={clinicEvents}
                 onRunAutomation={runAutomation}
+                onNavigate={navigateToWork}
                 busy={busy}
               />
             ) : null}
@@ -1540,6 +1672,8 @@ export default function Home() {
                 services={clinicServices}
                 clinicId={clinicId}
                 automations={clinicAutomations}
+                focus={workFocus?.module === "agenda" ? workFocus : null}
+                onNavigate={navigateToWork}
                 onRunAutomation={runAutomation}
                 onSaveAppointment={saveAppointment}
                 onPrepareAppointmentReminders={prepareAppointmentReminders}
@@ -1552,6 +1686,8 @@ export default function Home() {
                 patients={clinicPatients}
                 clinicId={clinicId}
                 busy={busy}
+                focus={workFocus?.module === "pacientes" ? workFocus : null}
+                onNavigate={navigateToWork}
                 onSavePatient={savePatient}
                 onPrepareReminders={preparePatientReminders}
                 onPrepareClinicalDocuments={preparePatientClinicalDocuments}
@@ -1566,6 +1702,8 @@ export default function Home() {
                 patients={clinicPatients}
                 clinicId={clinicId}
                 busy={busy}
+                focus={workFocus?.module === "medicos" ? workFocus : null}
+                onNavigate={navigateToWork}
                 onSaveDoctorProfile={saveDoctorProfile}
                 onApproveReport={approveReportAndPrepareDelivery}
                 onSaveMedicalDictation={saveMedicalDictation}
@@ -1582,12 +1720,20 @@ export default function Home() {
                 staff={clinicStaff}
                 automations={clinicAutomations}
                 busy={busy}
+                focus={workFocus?.module === "caja" ? workFocus : null}
+                onNavigate={navigateToWork}
                 onSaveCashRecord={saveCashRecord}
                 onPrepareCashClose={prepareCashClose}
                 onRunAutomation={runAutomation}
               />
             ) : null}
-            {activeModule === "reportes" ? <ReportsModule reports={clinicReports} /> : null}
+            {activeModule === "reportes" ? (
+              <ReportsModule
+                reports={clinicReports}
+                focus={workFocus?.module === "reportes" ? workFocus : null}
+                onNavigate={navigateToWork}
+              />
+            ) : null}
             {activeModule === "automatizaciones" ? (
               <AutomationsModule automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
             ) : null}
@@ -1659,11 +1805,13 @@ function DashboardModule({
   automations,
   events,
   onRunAutomation,
+  onNavigate,
   busy
 }: {
   automations: AutomationTemplate[];
   events: { id: string; type: string; message: string; at: string }[];
   onRunAutomation: (template: AutomationTemplate) => void;
+  onNavigate: (focus: WorkFocus) => void;
   busy: boolean;
 }) {
   const featured = automations.slice(0, 3);
@@ -1709,10 +1857,21 @@ function DashboardModule({
                 <strong>{template.name}</strong>
                 <p>{template.expectedOutput}</p>
               </div>
-              <button className="btn primary" onClick={() => onRunAutomation(template)} disabled={busy}>
-                <Play size={18} />
-                {busy ? "Ejecutando" : "Ejecutar"}
-              </button>
+              <div className="button-row">
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => onNavigate({ module: "automatizaciones", kind: "automation", automationId: template.id })}
+                  title="Abrir automatizacion"
+                >
+                  <Bot size={18} />
+                  Abrir
+                </button>
+                <button className="btn primary" type="button" onClick={() => onRunAutomation(template)} disabled={busy}>
+                  <Play size={18} />
+                  {busy ? "Ejecutando" : "Ejecutar"}
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -1743,6 +1902,8 @@ function AgendaModule({
   services,
   clinicId,
   automations,
+  focus,
+  onNavigate,
   onRunAutomation,
   onSaveAppointment,
   onPrepareAppointmentReminders,
@@ -1756,6 +1917,8 @@ function AgendaModule({
   services: ServiceCatalogItem[];
   clinicId: string;
   automations: AutomationTemplate[];
+  focus: WorkFocus | null;
+  onNavigate: (focus: WorkFocus) => void;
   onRunAutomation: (template: AutomationTemplate) => void;
   onSaveAppointment: (appointment: AppointmentRecord) => Promise<AppointmentRecord | undefined>;
   onPrepareAppointmentReminders: (appointment: AppointmentRecord) => void;
@@ -1815,6 +1978,15 @@ function AgendaModule({
       setSelectedAppointmentId(appointments[0]?.id ?? "");
     }
   }, [appointments, mode, selectedAppointmentId]);
+
+  useEffect(() => {
+    if (focus?.module !== "agenda" || focus.kind !== "appointment") return;
+    const appointment = appointments.find((item) => item.id === focus.appointmentId) ?? appointments.find((item) => dateKey(item.startsAt) === focus.date);
+    if (!appointment) return;
+    setMode("existing");
+    setSelectedAppointmentId(appointment.id);
+    setSelectedDate(dateKey(appointment.startsAt));
+  }, [appointments, focus]);
 
   useEffect(() => {
     if (mode === "new") {
@@ -1949,7 +2121,21 @@ function AgendaModule({
             <section className="agenda-timeline">
               <div className="section-title-row">
                 <h3>Citas del dia</h3>
-                <span className="status-chip">{agendaTotals.reminders} recordatorios</span>
+              <button
+                className="status-chip status-action"
+                type="button"
+                onClick={() =>
+                  onNavigate({
+                    module: "agenda",
+                    kind: "appointment",
+                    appointmentId: selectedAppointments.find((appointment) => appointment.reminderStatus === "pendiente")?.id,
+                    date: selectedDate
+                  })
+                }
+                title="Abrir recordatorios pendientes"
+              >
+                {agendaTotals.reminders} recordatorios
+              </button>
               </div>
               <div className="surface-list">
                 {selectedAppointments.map((appointment) => (
@@ -1972,8 +2158,12 @@ function AgendaModule({
                         {appointment.doctorName} - {appointment.serviceName}
                       </p>
                       <div className="tag-row">
-                        <span className={`status-chip ${appointment.status}`}>{appointmentStatusLabels[appointment.status]}</span>
-                        <span className={`status-chip ${appointment.reminderStatus}`}>{reminderStatusLabels[appointment.reminderStatus]}</span>
+                        <span className={`status-chip status-action ${appointment.status}`} title="Click en la cita para editar su estado">
+                          {appointmentStatusLabels[appointment.status]}
+                        </span>
+                        <span className={`status-chip status-action ${appointment.reminderStatus}`} title="Click en la cita para preparar recordatorio">
+                          {reminderStatusLabels[appointment.reminderStatus]}
+                        </span>
                         <span className="tag">{money(appointment.price, appointment.currency)}</span>
                       </div>
                     </div>
@@ -2146,7 +2336,15 @@ function AgendaModule({
                   <MessageCircle size={16} />
                   WhatsApp
                 </label>
-                <span className={`status-chip ${draft.reminderStatus}`}>{reminderStatusLabels[draft.reminderStatus]}</span>
+                <button
+                  className={`status-chip status-action ${draft.reminderStatus}`}
+                  type="button"
+                  onClick={() => (draft.id ? onPrepareAppointmentReminders(draft) : undefined)}
+                  disabled={busy || !draft.id}
+                  title="Preparar o revisar recordatorio"
+                >
+                  {reminderStatusLabels[draft.reminderStatus]}
+                </button>
               </div>
 
               <div className="field">
@@ -2186,7 +2384,14 @@ function AgendaModule({
                     <td>{schedule.appointments}</td>
                     <td>{schedule.verifiedHours}</td>
                     <td>
-                      <span className={`status-chip ${schedule.status}`}>{schedule.status}</span>
+                      <button
+                        className={`status-chip status-action ${schedule.status}`}
+                        type="button"
+                        onClick={() => onNavigate({ module: "medicos", kind: "doctor", doctorId: schedule.doctorId })}
+                        title="Ir a Medicos para editar horario"
+                      >
+                        {schedule.status}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -2237,6 +2442,8 @@ function PatientsModule({
   patients,
   clinicId,
   busy,
+  focus,
+  onNavigate,
   onSavePatient,
   onPrepareReminders,
   onPrepareClinicalDocuments
@@ -2244,6 +2451,8 @@ function PatientsModule({
   patients: PatientRecord[];
   clinicId: string;
   busy: boolean;
+  focus: WorkFocus | null;
+  onNavigate: (focus: WorkFocus) => void;
   onSavePatient: (patient: PatientRecord) => Promise<PatientRecord | undefined>;
   onPrepareReminders: (patient: PatientRecord) => void;
   onPrepareClinicalDocuments: (patient: PatientRecord) => void;
@@ -2273,6 +2482,14 @@ function PatientsModule({
       setSelectedPatientId(patients[0]?.id ?? "");
     }
   }, [mode, patients, selectedPatientId]);
+
+  useEffect(() => {
+    if (focus?.module !== "pacientes") return;
+    const patient = patients.find((item) => item.id === focus.patientId) ?? patients.find((item) => item.pendingDocuments.length > 0);
+    if (!patient) return;
+    setMode("existing");
+    setSelectedPatientId(patient.id);
+  }, [focus, patients]);
 
   useEffect(() => {
     if (mode === "new") {
@@ -2384,7 +2601,20 @@ function PatientsModule({
         <div className="patient-toolbar">
           <div className="row-metrics">
             <span>{patients.length} pacientes</span>
-            <span>{pendingCount} documentos pendientes</span>
+            <button
+              className="status-chip status-action pendiente"
+              type="button"
+              onClick={() =>
+                onNavigate({
+                  module: "pacientes",
+                  kind: "patient",
+                  patientId: patients.find((patient) => patient.pendingDocuments.length > 0)?.id
+                })
+              }
+              title="Abrir paciente con documentos pendientes"
+            >
+              {pendingCount} documentos pendientes
+            </button>
           </div>
           <button className="btn primary" type="button" onClick={startNewPatient} title="Ingresar paciente">
             <Plus size={18} />
@@ -2407,7 +2637,7 @@ function PatientsModule({
                 <strong>{patient.name}</strong>
                 <span>{patient.documentId}</span>
                 <span>{patient.nextAppointment || "Cita pendiente"}</span>
-                <span className={`status-chip riesgo-${patient.risk}`}>riesgo {patient.risk}</span>
+                <span className={`status-chip status-action riesgo-${patient.risk}`}>riesgo {patient.risk}</span>
               </button>
             ))}
             {patients.length === 0 ? <div className="empty-state">Sin pacientes registrados.</div> : null}
@@ -2661,7 +2891,22 @@ function PatientsModule({
             <div className="form-section">
               <div className="section-title-row">
                 <h3>Reportes y recetas</h3>
-                <span className="status-chip">{draft.reports.length}</span>
+                <button
+                  className="status-chip status-action"
+                  type="button"
+                  onClick={() =>
+                    onNavigate({
+                      module: "medicos",
+                      kind: "medical-report",
+                      patientId: draft.id,
+                      reportId: draft.reports.find((report) => report.status === "pendiente-aprobacion")?.id
+                    })
+                  }
+                  disabled={!draft.id || draft.reports.length === 0}
+                  title="Ir a aprobacion de reportes"
+                >
+                  {draft.reports.length}
+                </button>
               </div>
               <div className="patient-form-grid patient-form-grid-compact">
                 <div className="field">
@@ -2759,7 +3004,21 @@ function PatientsModule({
                       </div>
                     </div>
                     <div className="nested-actions">
-                      <span className={`status-chip ${report.status}`}>{reportStatusLabels[report.status]}</span>
+                      <button
+                        className={`status-chip status-action ${report.status}`}
+                        type="button"
+                        onClick={() => {
+                          if (report.status === "pendiente-aprobacion") {
+                            onNavigate({ module: "medicos", kind: "medical-report", patientId: draft.id, reportId: report.id });
+                            return;
+                          }
+                          onNavigate({ module: "pacientes", kind: "patient-report", patientId: draft.id, reportId: report.id });
+                        }}
+                        disabled={!draft.id}
+                        title={report.status === "pendiente-aprobacion" ? "Ir a aprobacion medica" : "Abrir reporte del paciente"}
+                      >
+                        {reportStatusLabels[report.status]}
+                      </button>
                       <button className="icon-btn danger" type="button" onClick={() => removeReport(report.id)} title="Quitar reporte">
                         <Trash2 size={16} />
                       </button>
@@ -2772,7 +3031,22 @@ function PatientsModule({
             <div className="form-section">
               <div className="section-title-row">
                 <h3>Instrucciones y preparacion</h3>
-                <span className="status-chip">{draft.instructions.length}</span>
+                <button
+                  className="status-chip status-action"
+                  type="button"
+                  onClick={() =>
+                    onNavigate({
+                      module: "pacientes",
+                      kind: "patient-instruction",
+                      patientId: draft.id,
+                      instructionId: draft.instructions.find((instruction) => instruction.status !== "enviado")?.id
+                    })
+                  }
+                  disabled={!draft.id || draft.instructions.length === 0}
+                  title="Abrir instrucciones pendientes"
+                >
+                  {draft.instructions.length}
+                </button>
               </div>
               <div className="patient-form-grid patient-form-grid-compact">
                 <div className="field">
@@ -2888,7 +3162,22 @@ function PatientsModule({
                       </div>
                     </div>
                     <div className="nested-actions">
-                      <span className={`status-chip ${instruction.status}`}>{instructionStatusLabels[instruction.status]}</span>
+                      <button
+                        className={`status-chip status-action ${instruction.status}`}
+                        type="button"
+                        onClick={() =>
+                          onNavigate({
+                            module: "pacientes",
+                            kind: "patient-instruction",
+                            patientId: draft.id,
+                            instructionId: instruction.id
+                          })
+                        }
+                        disabled={!draft.id}
+                        title="Abrir instruccion del paciente"
+                      >
+                        {instructionStatusLabels[instruction.status]}
+                      </button>
                       <button
                         className="icon-btn danger"
                         type="button"
@@ -2932,6 +3221,8 @@ function DoctorsModule({
   patients,
   clinicId,
   busy,
+  focus,
+  onNavigate,
   onSaveDoctorProfile,
   onApproveReport,
   onSaveMedicalDictation,
@@ -2944,6 +3235,8 @@ function DoctorsModule({
   patients: PatientRecord[];
   clinicId: string;
   busy: boolean;
+  focus: WorkFocus | null;
+  onNavigate: (focus: WorkFocus) => void;
   onSaveDoctorProfile: (doctor: StaffMember, schedules: DoctorSchedule[]) => Promise<StaffMember | undefined>;
   onApproveReport: (input: {
     patient: PatientRecord;
@@ -3024,6 +3317,34 @@ function DoctorsModule({
       setSelectedDoctorId(doctors[0]?.id ?? "");
     }
   }, [doctors, mode, selectedDoctorId]);
+
+  useEffect(() => {
+    if (focus?.module !== "medicos") return;
+
+    if (focus.kind === "doctor") {
+      const doctor = doctors.find((item) => item.id === focus.doctorId) ?? doctors.find((item) => item.status === "pendiente");
+      if (!doctor) return;
+      setMode("existing");
+      setSelectedDoctorId(doctor.id);
+      return;
+    }
+
+    const patient =
+      patients.find((item) => item.id === focus.patientId) ??
+      patients.find((item) => item.reports.some((report) => report.status === "pendiente-aprobacion"));
+    if (!patient) return;
+    const report =
+      patient.reports.find((item) => item.id === focus.reportId) ??
+      patient.reports.find((item) => item.status === "pendiente-aprobacion") ??
+      patient.reports[0];
+    const doctor = doctors.find((item) => item.name === report?.doctorName) ?? doctors.find((item) => item.reportApprovalEnabled) ?? doctors[0];
+    if (doctor) {
+      setMode("existing");
+      setSelectedDoctorId(doctor.id);
+    }
+    setSelectedDictationPatientId(patient.id);
+    setSelectedReportId(report?.id ?? newDictationReportId);
+  }, [doctors, focus, patients]);
 
   useEffect(() => {
     if (!selectedDictationPatientId || !patients.some((patient) => patient.id === selectedDictationPatientId)) {
@@ -3120,7 +3441,22 @@ function DoctorsModule({
             <div className="row-metrics">
               <span>{doctors.length} medicos</span>
               <span>{schedules.length} horarios</span>
-              <span>{visibleReports.filter((item) => item.report.status === "pendiente-aprobacion").length} aprobaciones</span>
+              <button
+                className="status-chip status-action pendiente-aprobacion"
+                type="button"
+                onClick={() => {
+                  const pending = visibleReports.find((item) => item.report.status === "pendiente-aprobacion");
+                  onNavigate({
+                    module: "medicos",
+                    kind: "medical-report",
+                    patientId: pending?.patient.id,
+                    reportId: pending?.report.id
+                  });
+                }}
+                title="Abrir aprobaciones medicas pendientes"
+              >
+                {visibleReports.filter((item) => item.report.status === "pendiente-aprobacion").length} aprobaciones
+              </button>
             </div>
             <button className="btn primary" type="button" onClick={startNewDoctor} title="Agregar medico">
               <Plus size={18} />
@@ -3143,7 +3479,7 @@ function DoctorsModule({
                   <strong>{doctor.name}</strong>
                   <span>{doctor.specialty}</span>
                   <span>{doctor.licenseNumber || "Licencia pendiente"}</span>
-                  <span className={`status-chip ${doctor.status}`}>{doctor.status}</span>
+                  <span className={`status-chip status-action ${doctor.status}`}>{doctor.status}</span>
                 </button>
               ))}
               {doctors.length === 0 ? <div className="empty-state">Sin medicos registrados.</div> : null}
@@ -3376,7 +3712,7 @@ function DoctorsModule({
                 >
                   <strong>{item.report.title}</strong>
                   <span>{item.patient.name}</span>
-                  <span className={`status-chip ${item.report.status}`}>{reportStatusLabels[item.report.status]}</span>
+                  <span className={`status-chip status-action ${item.report.status}`}>{reportStatusLabels[item.report.status]}</span>
                 </button>
               ))}
               {visibleReports.length === 0 ? <div className="empty-state">Sin reportes para revisar.</div> : null}
@@ -3414,9 +3750,21 @@ function DoctorsModule({
                       {selectedReportContext.patient.name} - {reportTypeLabels[selectedReportContext.report.type]}
                     </p>
                   </div>
-                  <span className={`status-chip ${selectedReportContext.report.status}`}>
+                  <button
+                    className={`status-chip status-action ${selectedReportContext.report.status}`}
+                    type="button"
+                    onClick={() =>
+                      onNavigate({
+                        module: "medicos",
+                        kind: "medical-report",
+                        patientId: selectedReportContext.patient.id,
+                        reportId: selectedReportContext.report.id
+                      })
+                    }
+                    title="Mantener foco en aprobacion medica"
+                  >
                     {reportStatusLabels[selectedReportContext.report.status]}
-                  </span>
+                  </button>
                 </div>
                 <div className="reader-block">
                   <strong>Resumen clinico</strong>
@@ -3516,7 +3864,20 @@ function DoctorsModule({
               </div>
               <div className="row-metrics">
                 <span>{schedule.verifiedHours} horas</span>
-                <span className={`status-chip ${schedule.status}`}>{schedule.status}</span>
+                <button
+                  className={`status-chip status-action ${schedule.status}`}
+                  type="button"
+                  onClick={() => {
+                    const doctor = doctors.find((item) => item.id === schedule.doctorId);
+                    if (doctor) {
+                      setMode("existing");
+                      setSelectedDoctorId(doctor.id);
+                    }
+                  }}
+                  title="Editar horario medico"
+                >
+                  {schedule.status}
+                </button>
               </div>
             </div>
           ))}
@@ -3841,6 +4202,8 @@ function CashModule({
   staff,
   automations,
   busy,
+  focus,
+  onNavigate,
   onSaveCashRecord,
   onPrepareCashClose,
   onRunAutomation
@@ -3853,23 +4216,35 @@ function CashModule({
   staff: StaffMember[];
   automations: AutomationTemplate[];
   busy: boolean;
+  focus: WorkFocus | null;
+  onNavigate: (focus: WorkFocus) => void;
   onSaveCashRecord: (
     input:
       | { type: "payment"; payment: CashTransaction }
       | { type: "expense"; expense: CashExpense }
       | { type: "invoice"; invoice: PendingInvoice }
+      | { type: "register"; register: CashRegister }
   ) => Promise<unknown>;
   onPrepareCashClose: (period: CashRegister["period"]) => void;
   onRunAutomation: (template: AutomationTemplate) => void;
 }) {
   const cashAutomation = automations.find((item) => item.id === "auto-caja-diaria");
   const clinicId = cashRegisters[0]?.clinicId ?? appointments[0]?.clinicId ?? staff[0]?.clinicId ?? "clinic-san-jose";
+  const [activeDesk, setActiveDesk] = useState<CashDeskSection>("payment");
+  const [selectedPeriod, setSelectedPeriod] = useState<CashRegister["period"]>("diario");
   const [paymentDraft, setPaymentDraft] = useState<CashTransaction>(() => createEmptyPayment(clinicId, appointments));
   const [expenseDraft, setExpenseDraft] = useState<CashExpense>(() => createEmptyExpense(clinicId));
   const [invoiceDraft, setInvoiceDraft] = useState<PendingInvoice>(() => createEmptyInvoice(clinicId, appointments));
+  const accountingSummaries = useMemo(
+    () => buildAccountingSummaries({ cashRegisters, payments, expenses, invoices, appointments, staff }),
+    [appointments, cashRegisters, expenses, invoices, payments, staff]
+  );
+  const selectedSummary = accountingSummaries.find((summary) => summary.period === selectedPeriod) ?? accountingSummaries[0];
   const completedPayments = payments.filter((payment) => payment.status === "completado");
+  const pendingPayments = payments.filter((payment) => payment.status === "pendiente");
   const pendingInvoices = invoices.filter((invoice) => invoice.status === "pendiente");
   const paidExpenses = expenses.filter((expense) => expense.status !== "pendiente");
+  const pendingExpenses = expenses.filter((expense) => expense.status === "pendiente");
   const methodTotals = completedPayments.reduce(
     (totals, payment) => ({
       ...totals,
@@ -3897,6 +4272,33 @@ function CashModule({
     setExpenseDraft((current) => ({ ...current, clinicId }));
     setInvoiceDraft((current) => ({ ...current, clinicId }));
   }, [clinicId]);
+
+  useEffect(() => {
+    if (focus?.module !== "caja") return;
+
+    if (focus.kind === "close") {
+      setSelectedPeriod(focus.period ?? "diario");
+      return;
+    }
+
+    if (focus.kind === "payment") {
+      setActiveDesk("payment");
+      const payment = payments.find((item) => item.id === focus.id) ?? pendingPayments[0];
+      if (payment) setPaymentDraft(payment);
+      return;
+    }
+
+    if (focus.kind === "expense") {
+      setActiveDesk("expense");
+      const expense = expenses.find((item) => item.id === focus.id) ?? pendingExpenses[0];
+      if (expense) setExpenseDraft(expense);
+      return;
+    }
+
+    setActiveDesk("invoice");
+    const invoice = invoices.find((item) => item.id === focus.id) ?? pendingInvoices[0];
+    if (invoice) setInvoiceDraft(invoice);
+  }, [expenses, focus, invoices, payments, pendingExpenses, pendingInvoices, pendingPayments]);
 
   function selectPaymentAppointment(appointmentId: string) {
     const appointment = appointments.find((item) => item.id === appointmentId);
@@ -3942,115 +4344,239 @@ function CashModule({
     setInvoiceDraft(createEmptyInvoice(clinicId, appointments));
   }
 
+  async function updateRegisterStatus(status: CashRegister["status"]) {
+    if (!selectedSummary) return;
+    await onSaveCashRecord({
+      type: "register",
+      register: {
+        id: selectedSummary.register?.id ?? "",
+        clinicId,
+        period: selectedSummary.period,
+        revenue: selectedSummary.revenue,
+        expenses: selectedSummary.expenses,
+        pendingInvoices: selectedSummary.pendingInvoices,
+        currency: "CRC",
+        status,
+        preparedBy: "Caja y Contabilidad",
+        updatedAt: selectedSummary.register?.updatedAt ?? ""
+      }
+    });
+  }
+
   return (
     <div className="grid">
-      <Panel icon={WalletCards} title="Caja cajera">
-        <div className="cash-module">
-          <div className="cash-grid">
-            {cashRegisters.map((cash) => (
-              <div className="surface-block" key={cash.id}>
+      <Panel icon={WalletCards} title="Caja y cierres contables">
+        <div className="accounting-module">
+          <div className="accounting-period-grid">
+            {accountingSummaries.map((summary) => (
+              <button
+                className={`surface-block accounting-period ${summary.period === selectedPeriod ? "active" : ""}`}
+                type="button"
+                key={summary.period}
+                onClick={() => setSelectedPeriod(summary.period)}
+                title={`Abrir cierre ${cashPeriodLabels[summary.period]}`}
+              >
                 <div className="section-title-row">
-                  <strong>Cierre {cashPeriodLabels[cash.period]}</strong>
-                  <button className="btn" type="button" onClick={() => onPrepareCashClose(cash.period)} disabled={busy} title="Preparar cierre con OpenClaw">
-                    <Bot size={18} />
-                    {busy ? "Preparando" : "Cierre"}
-                  </button>
+                  <strong>Cierre {cashPeriodLabels[summary.period]}</strong>
+                  <span className={`status-chip status-action ${summary.status}`}>{summary.status}</span>
                 </div>
                 <div className="mini-stat">
                   <span>Ingresos</span>
-                  <b>{money(cash.revenue, "CRC")}</b>
+                  <b>{money(summary.revenue, "CRC")}</b>
                 </div>
                 <div className="mini-stat">
-                  <span>Gastos</span>
-                  <b>{money(cash.expenses, "CRC")}</b>
+                  <span>Egresos</span>
+                  <b>{money(summary.expenses, "CRC")}</b>
                 </div>
                 <div className="mini-stat">
-                  <span>Facturas pendientes</span>
-                  <b>{cash.pendingInvoices}</b>
+                  <span>Neto</span>
+                  <b>{money(summary.net, "CRC")}</b>
                 </div>
-                <span className={`status-chip ${cash.status}`}>{cash.status}</span>
-              </div>
+                <div className="mini-stat">
+                  <span>Pendientes</span>
+                  <b>{summary.pendingInvoices}</b>
+                </div>
+              </button>
             ))}
           </div>
 
-          <div className="cash-method-grid">
-            {Object.entries(methodTotals).map(([method, total]) => (
-              <div className="surface-block" key={method}>
-                <strong>{cashMethodLabels[method as CashTransaction["method"]]}</strong>
-                <div className="metric-value">{money(total, "CRC")}</div>
+          {selectedSummary ? (
+            <div className="accounting-detail">
+              <div className="section-title-row">
+                <div>
+                  <h3>Cierre {cashPeriodLabels[selectedSummary.period]}</h3>
+                  <p className="muted-text">
+                    {selectedSummary.paymentsCount} pagos - {selectedSummary.expensesCount} egresos - {selectedSummary.pendingInvoices} pendientes
+                  </p>
+                </div>
+                <button
+                  className={`status-chip status-action ${selectedSummary.status}`}
+                  type="button"
+                  onClick={() =>
+                    selectedSummary.pendingInvoices > 0
+                      ? onNavigate({ module: "caja", kind: "invoice", id: pendingInvoices[0]?.id })
+                      : updateRegisterStatus(selectedSummary.status === "cerrado" ? "abierto" : "listo-contador")
+                  }
+                  title={selectedSummary.pendingInvoices > 0 ? "Abrir facturas pendientes" : "Actualizar estado del cierre"}
+                >
+                  {selectedSummary.status}
+                </button>
               </div>
-            ))}
-          </div>
+
+              <div className="accounting-ledger-grid">
+                <div className="reader-block">
+                  <strong>Resultado</strong>
+                  <div className="mini-stat">
+                    <span>Ingresos</span>
+                    <b>{money(selectedSummary.revenue, "CRC")}</b>
+                  </div>
+                  <div className="mini-stat">
+                    <span>Egresos</span>
+                    <b>{money(selectedSummary.expenses, "CRC")}</b>
+                  </div>
+                  <div className="mini-stat">
+                    <span>Neto</span>
+                    <b>{money(selectedSummary.net, "CRC")}</b>
+                  </div>
+                </div>
+
+                <div className="reader-block">
+                  <strong>Conciliacion</strong>
+                  {Object.entries(selectedSummary.methodTotals).map(([method, total]) => (
+                    <div className="mini-stat" key={method}>
+                      <span>{cashMethodLabels[method as CashTransaction["method"]]}</span>
+                      <b>{money(total, "CRC")}</b>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="reader-block">
+                  <strong>Contabilidad</strong>
+                  <div className="mini-stat">
+                    <span>Honorarios medicos</span>
+                    <b>{money(selectedSummary.doctorHonorarium, "CRC")}</b>
+                  </div>
+                  <div className="mini-stat">
+                    <span>Facturas pendientes</span>
+                    <b>{money(selectedSummary.pendingInvoiceTotal, "CRC")}</b>
+                  </div>
+                  <div className="mini-stat">
+                    <span>Preparado por</span>
+                    <b>{selectedSummary.register?.preparedBy ?? "Caja"}</b>
+                  </div>
+                </div>
+              </div>
+
+              <div className="button-row">
+                <button className="btn" type="button" onClick={() => onPrepareCashClose(selectedSummary.period)} disabled={busy} title="Preparar cierre con OpenClaw">
+                  <Bot size={18} />
+                  {busy ? "Preparando" : "Preparar cierre"}
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => updateRegisterStatus("listo-contador")}
+                  disabled={busy || selectedSummary.pendingInvoices > 0}
+                  title="Marcar listo para contador"
+                >
+                  <FileClock size={18} />
+                  Listo contador
+                </button>
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={() => updateRegisterStatus("cerrado")}
+                  disabled={busy || selectedSummary.pendingInvoices > 0 || selectedSummary.status === "cerrado"}
+                  title="Cerrar periodo contable"
+                >
+                  <CheckCircle2 size={18} />
+                  Cerrar periodo
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </Panel>
 
       <div className="cash-workspace">
-        <Panel icon={BadgeDollarSign} title="Registrar pago">
-          <form className="cash-form" onSubmit={submitPayment}>
-            <div className="appointment-form-grid">
-              <div className="field">
-                <label htmlFor="cash-appointment">Cita/servicio</label>
-                <select id="cash-appointment" value={paymentDraft.appointmentId ?? ""} onChange={(event) => selectPaymentAppointment(event.target.value)}>
-                  <option value="">Manual</option>
-                  {appointments.map((appointment) => (
-                    <option value={appointment.id} key={appointment.id}>
-                      {appointment.patientName} - {appointment.serviceName} - {money(appointment.price, "CRC")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="cash-patient">Paciente</label>
-                <input id="cash-patient" value={paymentDraft.patientName} onChange={(event) => setPaymentDraft((current) => ({ ...current, patientName: event.target.value }))} required />
-              </div>
-              <div className="field">
-                <label htmlFor="cash-service">Servicio</label>
-                <input id="cash-service" value={paymentDraft.serviceName} onChange={(event) => setPaymentDraft((current) => ({ ...current, serviceName: event.target.value }))} required />
-              </div>
-              <div className="field">
-                <label htmlFor="cash-method">Metodo</label>
-                <select id="cash-method" value={paymentDraft.method} onChange={(event) => setPaymentDraft((current) => ({ ...current, method: event.target.value as CashTransaction["method"] }))}>
-                  {Object.entries(cashMethodLabels).map(([value, label]) => (
-                    <option value={value} key={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="cash-amount">Monto colones</label>
-                <input id="cash-amount" type="number" min="0" value={paymentDraft.amount} onChange={(event) => setPaymentDraft((current) => ({ ...current, amount: Number(event.target.value) }))} required />
-              </div>
-              <div className="field">
-                <label htmlFor="cash-status">Estado</label>
-                <select id="cash-status" value={paymentDraft.status} onChange={(event) => setPaymentDraft((current) => ({ ...current, status: event.target.value as CashTransaction["status"] }))}>
-                  <option value="completado">Completado</option>
-                  <option value="pendiente">Pendiente</option>
-                  <option value="anulado">Anulado</option>
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="cash-reference">Referencia</label>
-                <input id="cash-reference" value={paymentDraft.reference} onChange={(event) => setPaymentDraft((current) => ({ ...current, reference: event.target.value }))} />
-              </div>
-              <div className="field">
-                <label htmlFor="cash-received-by">Recibido por</label>
-                <input id="cash-received-by" value={paymentDraft.receivedBy} onChange={(event) => setPaymentDraft((current) => ({ ...current, receivedBy: event.target.value }))} required />
-              </div>
-            </div>
-            <div className="field">
-              <label htmlFor="cash-notes">Notas</label>
-              <textarea id="cash-notes" value={paymentDraft.notes} onChange={(event) => setPaymentDraft((current) => ({ ...current, notes: event.target.value }))} />
-            </div>
-            <button className="btn primary" type="submit" disabled={busy} title="Registrar pago">
-              <Save size={18} />
-              Registrar pago
+        <Panel icon={BadgeDollarSign} title="Registro operativo">
+          <div className="segmented-control" role="tablist" aria-label="Registro de caja">
+            <button className={activeDesk === "payment" ? "active" : ""} type="button" onClick={() => setActiveDesk("payment")}>
+              Pago
             </button>
-          </form>
-        </Panel>
+            <button className={activeDesk === "expense" ? "active" : ""} type="button" onClick={() => setActiveDesk("expense")}>
+              Gasto
+            </button>
+            <button className={activeDesk === "invoice" ? "active" : ""} type="button" onClick={() => setActiveDesk("invoice")}>
+              Factura
+            </button>
+          </div>
 
-        <div className="grid">
-          <Panel icon={WalletCards} title="Gastos empresa">
+          {activeDesk === "payment" ? (
+            <form className="cash-form" onSubmit={submitPayment}>
+              <div className="appointment-form-grid">
+                <div className="field">
+                  <label htmlFor="cash-appointment">Cita/servicio</label>
+                  <select id="cash-appointment" value={paymentDraft.appointmentId ?? ""} onChange={(event) => selectPaymentAppointment(event.target.value)}>
+                    <option value="">Manual</option>
+                    {appointments.map((appointment) => (
+                      <option value={appointment.id} key={appointment.id}>
+                        {appointment.patientName} - {appointment.serviceName} - {money(appointment.price, "CRC")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-patient">Paciente</label>
+                  <input id="cash-patient" value={paymentDraft.patientName} onChange={(event) => setPaymentDraft((current) => ({ ...current, patientName: event.target.value }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-service">Servicio</label>
+                  <input id="cash-service" value={paymentDraft.serviceName} onChange={(event) => setPaymentDraft((current) => ({ ...current, serviceName: event.target.value }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-method">Metodo</label>
+                  <select id="cash-method" value={paymentDraft.method} onChange={(event) => setPaymentDraft((current) => ({ ...current, method: event.target.value as CashTransaction["method"] }))}>
+                    {Object.entries(cashMethodLabels).map(([value, label]) => (
+                      <option value={value} key={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-amount">Monto colones</label>
+                  <input id="cash-amount" type="number" min="0" value={paymentDraft.amount} onChange={(event) => setPaymentDraft((current) => ({ ...current, amount: Number(event.target.value) }))} required />
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-status">Estado</label>
+                  <select id="cash-status" value={paymentDraft.status} onChange={(event) => setPaymentDraft((current) => ({ ...current, status: event.target.value as CashTransaction["status"] }))}>
+                    <option value="completado">Completado</option>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="anulado">Anulado</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-reference">Referencia</label>
+                  <input id="cash-reference" value={paymentDraft.reference} onChange={(event) => setPaymentDraft((current) => ({ ...current, reference: event.target.value }))} />
+                </div>
+                <div className="field">
+                  <label htmlFor="cash-received-by">Recibido por</label>
+                  <input id="cash-received-by" value={paymentDraft.receivedBy} onChange={(event) => setPaymentDraft((current) => ({ ...current, receivedBy: event.target.value }))} required />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="cash-notes">Notas</label>
+                <textarea id="cash-notes" value={paymentDraft.notes} onChange={(event) => setPaymentDraft((current) => ({ ...current, notes: event.target.value }))} />
+              </div>
+              <button className="btn primary" type="submit" disabled={busy} title="Registrar pago">
+                <Save size={18} />
+                Registrar pago
+              </button>
+            </form>
+          ) : null}
+
+          {activeDesk === "expense" ? (
             <form className="cash-form" onSubmit={submitExpense}>
               <div className="field-grid">
                 <div className="field">
@@ -4100,9 +4626,9 @@ function CashModule({
                 Registrar gasto
               </button>
             </form>
-          </Panel>
+          ) : null}
 
-          <Panel icon={FileClock} title="Facturas pendientes">
+          {activeDesk === "invoice" ? (
             <form className="cash-form" onSubmit={submitInvoice}>
               <div className="field-grid">
                 <div className="field">
@@ -4146,8 +4672,85 @@ function CashModule({
                 Registrar factura
               </button>
             </form>
-          </Panel>
-        </div>
+          ) : null}
+        </Panel>
+
+        <Panel icon={FileClock} title="Pendientes de cierre">
+          <div className="surface-list">
+            {[...pendingInvoices.slice(0, 4), ...pendingPayments.slice(0, 2), ...pendingExpenses.slice(0, 2)].map((item) => {
+              if ("concept" in item) {
+                return (
+                  <div className="surface-row" key={item.id}>
+                    <div>
+                      <strong>{item.patientName}</strong>
+                      <p>
+                        {item.concept} - vence {item.dueDate}
+                      </p>
+                    </div>
+                    <button
+                      className={`status-chip status-action ${item.status}`}
+                      type="button"
+                      onClick={() => {
+                        setActiveDesk("invoice");
+                        setInvoiceDraft(item);
+                      }}
+                      title="Abrir factura pendiente"
+                    >
+                      {money(item.amount, "CRC")}
+                    </button>
+                  </div>
+                );
+              }
+
+              if ("serviceName" in item) {
+                return (
+                  <div className="surface-row" key={item.id}>
+                    <div>
+                      <strong>{item.patientName}</strong>
+                      <p>
+                        {item.serviceName} - {cashMethodLabels[item.method]}
+                      </p>
+                    </div>
+                    <button
+                      className={`status-chip status-action ${item.status}`}
+                      type="button"
+                      onClick={() => {
+                        setActiveDesk("payment");
+                        setPaymentDraft(item);
+                      }}
+                      title="Abrir pago pendiente"
+                    >
+                      {item.status}
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="surface-row" key={item.id}>
+                  <div>
+                    <strong>{item.description}</strong>
+                    <p>
+                      {item.category} - {item.vendor || "sin proveedor"}
+                    </p>
+                  </div>
+                  <button
+                    className={`status-chip status-action ${item.status}`}
+                    type="button"
+                    onClick={() => {
+                      setActiveDesk("expense");
+                      setExpenseDraft(item);
+                    }}
+                    title="Abrir gasto pendiente"
+                  >
+                    {item.status}
+                  </button>
+                </div>
+              );
+            })}
+            {pendingInvoices.length + pendingPayments.length + pendingExpenses.length === 0 ? <div className="empty-state">Sin pendientes de cierre.</div> : null}
+          </div>
+        </Panel>
       </div>
 
       <div className="cash-support-grid">
@@ -4163,7 +4766,17 @@ function CashModule({
                 </div>
                 <div className="row-metrics">
                   <span>{money(payment.amount, "CRC")}</span>
-                  <span className={`status-chip ${payment.status}`}>{payment.status}</span>
+                  <button
+                    className={`status-chip status-action ${payment.status}`}
+                    type="button"
+                    onClick={() => {
+                      setActiveDesk("payment");
+                      setPaymentDraft(payment);
+                    }}
+                    title="Abrir movimiento"
+                  >
+                    {payment.status}
+                  </button>
                 </div>
               </div>
             ))}
@@ -4196,7 +4809,17 @@ function CashModule({
                     {invoice.concept} - vence {invoice.dueDate}
                   </p>
                 </div>
-                <span className={`status-chip ${invoice.status}`}>{money(invoice.amount, "CRC")}</span>
+                <button
+                  className={`status-chip status-action ${invoice.status}`}
+                  type="button"
+                  onClick={() => {
+                    setActiveDesk("invoice");
+                    setInvoiceDraft(invoice);
+                  }}
+                  title="Abrir factura"
+                >
+                  {money(invoice.amount, "CRC")}
+                </button>
               </div>
             ))}
           </div>
@@ -4212,7 +4835,17 @@ function CashModule({
                     {expense.category} - {expense.vendor || "sin proveedor"}
                   </p>
                 </div>
-                <span className={`status-chip ${expense.status}`}>{money(expense.amount, "CRC")}</span>
+                <button
+                  className={`status-chip status-action ${expense.status}`}
+                  type="button"
+                  onClick={() => {
+                    setActiveDesk("expense");
+                    setExpenseDraft(expense);
+                  }}
+                  title="Abrir gasto"
+                >
+                  {money(expense.amount, "CRC")}
+                </button>
               </div>
             ))}
           </div>
@@ -4237,12 +4870,22 @@ function CashModule({
   );
 }
 
-function ReportsModule({ reports }: { reports: ReportSummary[] }) {
+function ReportsModule({
+  reports,
+  focus,
+  onNavigate
+}: {
+  reports: ReportSummary[];
+  focus: WorkFocus | null;
+  onNavigate: (focus: WorkFocus) => void;
+}) {
+  const focusedReportId = focus?.module === "reportes" ? focus.reportId : undefined;
+
   return (
     <Panel icon={BarChart3} title="Reportes">
       <div className="surface-list">
         {reports.map((report) => (
-          <div className="surface-row report-row" key={report.id}>
+          <div className={`surface-row report-row ${focusedReportId === report.id ? "active" : ""}`} key={report.id}>
             <div>
               <strong>{report.title}</strong>
               <p>
@@ -4256,7 +4899,18 @@ function ReportsModule({ reports }: { reports: ReportSummary[] }) {
                 ))}
               </div>
             </div>
-            <span className={`status-chip ${report.status}`}>{report.status}</span>
+            <button
+              className={`status-chip status-action ${report.status}`}
+              type="button"
+              onClick={() =>
+                report.ownerRole === "contador"
+                  ? onNavigate({ module: "caja", kind: "close", period: "mensual" })
+                  : onNavigate({ module: "medicos", kind: "doctor" })
+              }
+              title={report.ownerRole === "contador" ? "Abrir cierre contable" : "Abrir revision operativa"}
+            >
+              {report.status}
+            </button>
           </div>
         ))}
       </div>

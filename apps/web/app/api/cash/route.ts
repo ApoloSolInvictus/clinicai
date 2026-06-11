@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getStateForAccess, hydrateState, persistState, upsertCashExpense, upsertCashTransaction, upsertPendingInvoice } from "@/lib/data";
+import {
+  getStateForAccess,
+  hydrateState,
+  persistState,
+  upsertCashExpense,
+  upsertCashRegister,
+  upsertCashTransaction,
+  upsertPendingInvoice
+} from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const methodSchema = z.enum(["efectivo", "tarjeta", "sinpe", "transferencia"]);
@@ -50,10 +58,24 @@ const invoiceSchema = z.object({
   notes: z.string().max(1200).default("")
 });
 
+const registerSchema = z.object({
+  id: z.string().optional(),
+  clinicId: z.string().min(1),
+  period: z.enum(["diario", "semanal", "mensual"]),
+  revenue: z.coerce.number().min(0),
+  expenses: z.coerce.number().min(0),
+  pendingInvoices: z.coerce.number().min(0),
+  currency: z.literal("CRC").default("CRC"),
+  status: z.enum(["abierto", "listo-contador", "requiere-revision", "cerrado"]),
+  preparedBy: z.string().min(1).max(140).default("Caja"),
+  updatedAt: z.string().optional()
+});
+
 const payloadSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("payment"), payment: paymentSchema }),
   z.object({ type: z.literal("expense"), expense: expenseSchema }),
-  z.object({ type: z.literal("invoice"), invoice: invoiceSchema })
+  z.object({ type: z.literal("invoice"), invoice: invoiceSchema }),
+  z.object({ type: z.literal("register"), register: registerSchema })
 ]);
 
 export async function GET(request: Request) {
@@ -93,7 +115,9 @@ export async function POST(request: Request) {
       ? parsed.data.payment.clinicId
       : parsed.data.type === "expense"
         ? parsed.data.expense.clinicId
-        : parsed.data.invoice.clinicId;
+        : parsed.data.type === "invoice"
+          ? parsed.data.invoice.clinicId
+          : parsed.data.register.clinicId;
 
   if (!canAccessClinic(auth.user, clinicId)) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
@@ -105,7 +129,9 @@ export async function POST(request: Request) {
       ? upsertCashTransaction(parsed.data.payment)
       : parsed.data.type === "expense"
         ? upsertCashExpense(parsed.data.expense)
-        : upsertPendingInvoice(parsed.data.invoice);
+        : parsed.data.type === "invoice"
+          ? upsertPendingInvoice(parsed.data.invoice)
+          : upsertCashRegister(parsed.data.register);
   await persistState();
 
   return NextResponse.json({

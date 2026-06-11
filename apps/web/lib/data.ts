@@ -195,7 +195,7 @@ export type CashRegister = {
   expenses: number;
   pendingInvoices: number;
   currency: string;
-  status: "abierto" | "listo-contador" | "requiere-revision";
+  status: "abierto" | "listo-contador" | "requiere-revision" | "cerrado";
   preparedBy: string;
   updatedAt: string;
 };
@@ -256,6 +256,10 @@ export type CashExpenseInput = Omit<CashExpense, "id"> & {
 };
 
 export type PendingInvoiceInput = Omit<PendingInvoice, "id"> & {
+  id?: string;
+};
+
+export type CashRegisterInput = Omit<CashRegister, "id" | "updatedAt"> & {
   id?: string;
 };
 
@@ -1243,6 +1247,11 @@ function normalizeAppointment(appointment: LegacyAppointmentRecord): Appointment
 
 function normalizeCashRegister(register: LegacyCashRegister): CashRegister {
   const sourceCurrency = register.currency ?? "CRC";
+  const rawStatus = register.status;
+  const status: CashRegister["status"] =
+    rawStatus === "abierto" || rawStatus === "listo-contador" || rawStatus === "requiere-revision" || rawStatus === "cerrado"
+      ? rawStatus
+      : "abierto";
 
   return {
     id: register.id,
@@ -1252,7 +1261,7 @@ function normalizeCashRegister(register: LegacyCashRegister): CashRegister {
     expenses: crcAmount(register.expenses, sourceCurrency),
     pendingInvoices: register.pendingInvoices ?? 0,
     currency: crcCurrency(),
-    status: register.status ?? "abierto",
+    status,
     preparedBy: register.preparedBy ?? "Caja",
     updatedAt: register.updatedAt ?? now
   };
@@ -1367,12 +1376,20 @@ function recalculateCashRegisters(state: CentralState, clinicId: string) {
     const register = state.cashRegisters.find((item) => item.clinicId === clinicId && item.period === period);
 
     if (register) {
+      const nextStatus =
+        register.status === "cerrado"
+          ? "cerrado"
+          : pendingInvoices > 0
+            ? "requiere-revision"
+            : register.status === "listo-contador"
+              ? "listo-contador"
+              : "abierto";
       Object.assign(register, {
         revenue,
         expenses,
         pendingInvoices,
         currency: "CRC",
-        status: period === "diario" && pendingInvoices > 0 ? "requiere-revision" : "abierto",
+        status: nextStatus,
         updatedAt: timestamp
       });
     } else {
@@ -1395,6 +1412,12 @@ function recalculateCashRegisters(state: CentralState, clinicId: string) {
   const monthly = state.cashRegisters.find((register) => register.clinicId === clinicId && register.period === "mensual");
   if (accountantReport && monthly) {
     accountantReport.updatedAt = timestamp;
+    accountantReport.status =
+      monthly.status === "cerrado" || monthly.status === "listo-contador"
+        ? "listo"
+        : monthly.pendingInvoices > 0
+          ? "requiere-aprobacion"
+          : "pendiente";
     accountantReport.metrics = [
       { label: "Ingresos", value: new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC", maximumFractionDigits: 0 }).format(monthly.revenue) },
       { label: "Gastos", value: new Intl.NumberFormat("es-CR", { style: "currency", currency: "CRC", maximumFractionDigits: 0 }).format(monthly.expenses) },
@@ -1853,6 +1876,41 @@ export function upsertCashTransaction(input: CashTransactionInput) {
   });
 
   return transaction;
+}
+
+export function upsertCashRegister(input: CashRegisterInput) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const normalized = normalizeCashRegister({
+    ...input,
+    id: input.id ?? makeId("cash"),
+    updatedAt: timestamp
+  });
+  const index = state.cashRegisters.findIndex(
+    (item) => item.id === normalized.id || (item.clinicId === normalized.clinicId && item.period === normalized.period)
+  );
+
+  if (index >= 0) {
+    state.cashRegisters[index] = normalized;
+  } else {
+    state.cashRegisters.unshift(normalized);
+  }
+
+  const report = state.reports.find((item) => item.clinicId === normalized.clinicId && item.id === "rep-1");
+  if (report && normalized.period === "mensual") {
+    report.status = normalized.status === "cerrado" || normalized.status === "listo-contador" ? "listo" : "requiere-aprobacion";
+    report.updatedAt = timestamp;
+  }
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: normalized.clinicId,
+    type: "cash.close.updated",
+    message: `Cierre ${normalized.period} marcado como ${normalized.status}.`,
+    at: timestamp
+  });
+
+  return normalized;
 }
 
 export function upsertCashExpense(input: CashExpenseInput) {
