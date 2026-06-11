@@ -29,7 +29,7 @@ npm run dev:web
 
 Copia `.env.example` a `.env.local` para la Web App o a `.env` para Compose segun el entorno.
 
-Para desarrollo local con alias `.node`, `CLINIC_NODE_URL_TEMPLATE` puede usar `http://{clinicSlug}.node:8787`; cada clinica nueva hereda su URL desde el id, por ejemplo `clinic-san-jose` queda en `http://clinic-san-jose.node:8787`. En Vercel o produccion, configura esa plantilla con un dominio publico HTTPS, por ejemplo `https://{clinicSlug}.nodes.tu-dominio.com`, y apunta ese wildcard/tunel al nodo de cada clinica. `CLINIC_NODE_CONFIG_JSON` queda solo para overrides por clinica, como tokens, nombres o URLs especiales.
+Para desarrollo local con alias `.node`, `CLINIC_NODE_URL_TEMPLATE` puede usar `http://{clinicSlug}.node:8787`; cada clinica nueva hereda su URL desde el id, por ejemplo `clinic-san-jose` queda en `http://clinic-san-jose.node:8787`. En Vercel o produccion, configura `CLINIC_NODE_BASE_DOMAIN=node.7openclinic.com` para que cada perfil use `https://{clinicSlug}.node.7openclinic.com`. `CLINIC_NODE_CONFIG_JSON` queda solo para overrides por clinica, como tokens, nombres o URLs especiales.
 
 La variable `OPENCLAW_MODE=gateway` conecta el nodo local con un Gateway real de OpenClaw. En esta maquina el Gateway se levanta desde Ubuntu WSL2 con Docker y queda en `http://127.0.0.1:18789`.
 
@@ -67,3 +67,4 @@ Para produccion en Vercel se recomienda que el nodo local haga `pull` de tareas 
 
 Guia de deploy: [docs/vercel-deploy.md](docs/vercel-deploy.md).
 Guia de Firebase Auth: [docs/firebase-auth.md](docs/firebase-auth.md).
+Guia Cloudflare/nodos: [docs/cloudflare-node-domain.md](docs/cloudflare-node-domain.md).

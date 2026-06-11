@@ -14,7 +14,8 @@ const config = {
   gatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN ?? "",
   runnerUrl: process.env.OPENCLAW_RUNNER_URL ?? "",
   runnerTimeoutMs: Number(process.env.OPENCLAW_RUNNER_TIMEOUT_MS ?? 30_000),
-  token: process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token"
+  token: process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token",
+  healthRequiresToken: process.env.NODE_HEALTH_REQUIRES_TOKEN === "true" || process.env.OPENCLINIC_SECURE_HEALTH === "true"
 };
 
 const localDb = {
@@ -174,7 +175,7 @@ function pushEvent(type, message, extra = {}) {
   return event;
 }
 
-app.get("/health", async (_request, response) => {
+app.get("/health", config.healthRequiresToken ? requireToken : (_request, _response, next) => next(), async (_request, response) => {
   const openclaw = await getOpenClawStatus(config);
   response.json({
     ok: true,

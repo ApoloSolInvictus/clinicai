@@ -23,9 +23,11 @@ export async function GET(request: Request) {
     nodeUrl: node?.nodeUrl ?? null,
     cloudRuntime: isCloudRuntime(),
     localNodeUrl: node?.nodeUrl ? isLocalNodeUrl(node.nodeUrl) : false,
+    hasBaseDomain: Boolean((process.env.CLINIC_NODE_BASE_DOMAIN ?? process.env.OPENCLINIC_NODE_BASE_DOMAIN)?.trim()),
     hasPublicTemplate: Boolean(process.env.CLINIC_NODE_PUBLIC_URL_TEMPLATE?.trim()),
     hasUrlTemplate: Boolean(process.env.CLINIC_NODE_URL_TEMPLATE?.trim()),
     hasJsonConfig: Boolean(process.env.CLINIC_NODE_CONFIG_JSON?.trim()),
+    hasCloudflareAccess: Boolean(node?.accessClientId && node?.accessClientSecret),
     hint: node?.nodeUrl ? getLocalNodeUrlHint(node.nodeUrl) : "No hay nodo configurado para esta clinica."
   });
 }

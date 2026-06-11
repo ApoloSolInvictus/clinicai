@@ -18,8 +18,10 @@ Configura estas variables en `Production` y `Preview`:
 - `LOCAL_NODE_TOKEN`: token compartido para enviar tareas al nodo local.
 - `CLINIC_NODE_IDS`: lista separada por comas para publicar clinicas conocidas, por ejemplo `clinic-san-jose,clinic-escazu`.
 - `CLINIC_NODE_URL_TEMPLATE`: plantilla general para construir el dominio de cada nodo. Usa `https://{clinicSlug}.nodes.tu-dominio.com` en produccion o `http://{clinicSlug}.node:8787` solo en desarrollo local.
+- `CLINIC_NODE_BASE_DOMAIN`: dominio base comercial para nodos por clinica. En OpenClinic usa `node.7openclinic.com`, lo que genera `https://{clinicSlug}.node.7openclinic.com`.
 - `CLINIC_NODE_PUBLIC_URL_TEMPLATE`: override publico con prioridad sobre JSON y plantilla local. Util para Vercel, por ejemplo `https://{clinicSlug}.nodes.tu-dominio.com` o un tunel temporal `https://abc.trycloudflare.com`.
 - `CLINIC_NODE_CONFIG_JSON`: overrides multi-clinica con URL, nombre o token por Docker local.
+- `CLOUDFLARE_ACCESS_CLIENT_ID` y `CLOUDFLARE_ACCESS_CLIENT_SECRET`: Service Token de Cloudflare Access para proteger `*.node.7openclinic.com`.
 - `NEXT_PUBLIC_FIREBASE_*`: configuracion web de Firebase Auth.
 - `FIREBASE_*`: credenciales de Firebase Admin para verificar tokens.
 - `OPENCLINIC_STATE_STORE`: usa `firestore` en produccion para persistir el estado central.
@@ -27,7 +29,13 @@ Configura estas variables en `Production` y `Preview`:
 
 Para una demo rapida, `LOCAL_NODE_URL` puede apuntar a un tunel HTTPS temporal hacia `http://localhost:8787`. Para desarrollo local con archivo hosts, usa `http://clinic-san-jose.node:8787`. Para produccion, usa un dominio publico por clinica, VPN, mTLS, Cloudflare Tunnel, Tailscale Funnel, reverse proxy seguro o un modelo de pull donde el nodo local consulte tareas salientes. Si configuras `clinic-san-jose.node` sin protocolo, la app lo normaliza a `https://clinic-san-jose.node`, lo cual requiere que exista un listener HTTPS en 443.
 
-Si Vercel sigue mostrando `http://clinic-san-jose.node:8787`, revisa `CLINIC_NODE_CONFIG_JSON`: un JSON viejo puede estar sobreescribiendo la plantilla. Para una correccion rapida, define `CLINIC_NODE_PUBLIC_URL_TEMPLATE` con la URL HTTPS publica; esa variable tiene prioridad.
+Para el dominio actual de OpenClinic, configura:
+
+```bash
+CLINIC_NODE_BASE_DOMAIN=node.7openclinic.com
+```
+
+Si Vercel sigue mostrando `http://clinic-san-jose.node:8787`, revisa `CLINIC_NODE_CONFIG_JSON`: un JSON viejo puede estar sobreescribiendo la plantilla. Para una correccion rapida, define `CLINIC_NODE_PUBLIC_URL_TEMPLATE=https://{clinicSlug}.node.7openclinic.com`; esa variable tiene prioridad.
 
 Puedes validar que Vercel tomo la variable con:
 
@@ -35,9 +43,10 @@ Puedes validar que Vercel tomo la variable con:
 /api/node-config?clinicId=clinic-san-jose
 ```
 
-Debe mostrar `cloudRuntime: true`, `hasPublicTemplate: true` y un `nodeUrl` HTTPS publico. Si `nodeUrl` sigue siendo `http://clinic-san-jose.node:8787`, la variable no quedo aplicada al entorno correcto o falta redeploy.
+Debe mostrar `cloudRuntime: true`, `hasBaseDomain: true` o `hasPublicTemplate: true`, `hasCloudflareAccess: true` y un `nodeUrl` HTTPS publico. Si `nodeUrl` sigue siendo `http://clinic-san-jose.node:8787`, la variable no quedo aplicada al entorno correcto o falta redeploy.
 
 Guia de Firebase: [firebase-auth.md](firebase-auth.md).
+Guia Cloudflare/nodos: [cloudflare-node-domain.md](cloudflare-node-domain.md).
 
 ## Comandos CLI
 

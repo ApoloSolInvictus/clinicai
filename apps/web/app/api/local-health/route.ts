@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
+import { getClinicNodeConfig, getClinicNodeRequestHeaders, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
 import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 export const maxDuration = 10;
@@ -36,9 +36,7 @@ export async function GET(request: Request) {
 
   try {
     const response = await fetch(`${node.nodeUrl.replace(/\/$/, "")}/health`, {
-      headers: {
-        ...(node.token ? { authorization: `Bearer ${node.token}` } : {})
-      },
+      headers: getClinicNodeRequestHeaders(node),
       cache: "no-store",
       signal: AbortSignal.timeout(8000)
     });

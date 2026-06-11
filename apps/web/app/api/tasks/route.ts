@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
+import { getClinicNodeConfig, getClinicNodeRequestHeaders, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
 import { addEvent, createTask, getState, hydrateState, patchClinic, patchTask, persistState } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(node.token ? { authorization: `Bearer ${node.token}` } : {})
+        ...getClinicNodeRequestHeaders(node)
       },
       body: JSON.stringify({ ...task, context }),
       cache: "no-store",

@@ -6,6 +6,8 @@ export type ClinicNodeConfig = {
   region: string;
   nodeUrl: string;
   token?: string;
+  accessClientId?: string;
+  accessClientSecret?: string;
 };
 
 type RawClinicNodeConfig = Partial<Omit<ClinicNodeConfig, "id">> & {
@@ -115,9 +117,28 @@ function buildNodeUrlFromTemplate(clinicId: string) {
 
 function buildNodeUrlFromPublicTemplate(clinicId: string) {
   const template = process.env.CLINIC_NODE_PUBLIC_URL_TEMPLATE?.trim();
-  if (!template) return "";
+  if (template) return buildNodeUrlFromRawTemplate(clinicId, template);
 
-  return buildNodeUrlFromRawTemplate(clinicId, template);
+  const baseDomain = normalizeNodeBaseDomain(process.env.CLINIC_NODE_BASE_DOMAIN ?? process.env.OPENCLINIC_NODE_BASE_DOMAIN ?? "");
+  if (!baseDomain) return "";
+
+  return buildNodeUrlFromRawTemplate(clinicId, `https://{clinicSlug}.${baseDomain}`);
+}
+
+function normalizeNodeBaseDomain(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const rawUrl = hasUrlScheme(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(rawUrl);
+    return url.hostname.replace(/^\*\./, "");
+  } catch {
+    return trimmed
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/.*$/, "")
+      .replace(/^\*\./, "");
+  }
 }
 
 function buildNodeUrlFromRawTemplate(clinicId: string, template: string) {
@@ -139,7 +160,9 @@ function normalizeClinicConfig(id: string, value: RawClinicNodeConfig): ClinicNo
     name: value.name ?? id,
     region: value.region ?? "Costa Rica",
     nodeUrl,
-    token: value.token ?? process.env.LOCAL_NODE_TOKEN
+    token: value.token ?? process.env.LOCAL_NODE_TOKEN,
+    accessClientId: value.accessClientId ?? process.env.CLOUDFLARE_ACCESS_CLIENT_ID,
+    accessClientSecret: value.accessClientSecret ?? process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET
   };
 }
 
@@ -172,7 +195,21 @@ function getTemplateClinicConfig(clinicId: string): ClinicNodeConfig | null {
     name: clinicId,
     region: process.env.CLINIC_REGION ?? "Costa Rica",
     nodeUrl,
-    token: process.env.LOCAL_NODE_TOKEN
+    token: process.env.LOCAL_NODE_TOKEN,
+    accessClientId: process.env.CLOUDFLARE_ACCESS_CLIENT_ID,
+    accessClientSecret: process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET
+  };
+}
+
+export function getClinicNodeRequestHeaders(node: Pick<ClinicNodeConfig, "token" | "accessClientId" | "accessClientSecret">) {
+  return {
+    ...(node.token ? { authorization: `Bearer ${node.token}` } : {}),
+    ...(node.accessClientId && node.accessClientSecret
+      ? {
+          "CF-Access-Client-Id": node.accessClientId,
+          "CF-Access-Client-Secret": node.accessClientSecret
+        }
+      : {})
   };
 }
 

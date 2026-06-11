@@ -9,6 +9,7 @@ services:
       CLINIC_NAME: ${CLINIC_NAME:-Clinica San Jose}
       CENTRAL_API_URL: ${CENTRAL_API_URL:-http://host.docker.internal:3000/api}
       LOCAL_NODE_TOKEN: ${LOCAL_NODE_TOKEN:-dev-local-node-token}
+      NODE_HEALTH_REQUIRES_TOKEN: ${NODE_HEALTH_REQUIRES_TOKEN:-true}
       OPENCLAW_MODE: ${OPENCLAW_MODE:-gateway}
       OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:18789}
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
