@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
-import { addEvent, createTask, getState, patchClinic, patchTask } from "@/lib/data";
+import { addEvent, createTask, getState, hydrateState, patchClinic, patchTask, persistState } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const taskSchema = z.object({
@@ -52,9 +52,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const task = createTask(parsed.data);
   const node = getClinicNodeConfig(task.clinicId);
   const context = buildLocalExecutionContext(task.clinicId);
+  await persistState();
 
   if (!node?.nodeUrl) {
     return NextResponse.json({
@@ -78,6 +80,7 @@ export async function POST(request: Request) {
       type: "local.forward.pending",
       message
     });
+    await persistState();
 
     return NextResponse.json({
       task: updatedTask,
@@ -108,6 +111,7 @@ export async function POST(request: Request) {
         type: "local.forward.failed",
         message: `El nodo local respondio con HTTP ${response.status}.`
       });
+      await persistState();
 
       return NextResponse.json({ task: { ...task, status: "failed" }, result }, { status: 502 });
     }
@@ -119,6 +123,7 @@ export async function POST(request: Request) {
       type: "local.task.completed",
       message: "OpenClaw local ejecuto la automatizacion y devolvio trazabilidad."
     });
+    await persistState();
 
     return NextResponse.json({
       task: updatedTask,
@@ -134,6 +139,7 @@ export async function POST(request: Request) {
       type: "local.forward.pending",
       message: "La tarea quedo pendiente; el nodo local no estuvo disponible en este host."
     });
+    await persistState();
 
     return NextResponse.json({
       task: updatedTask,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { approvePatientReport, getStateForAccess, updatePatientReportDraft } from "@/lib/data";
+import { approvePatientReport, getStateForAccess, hydrateState, persistState, updatePatientReportDraft } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const approvalSchema = z.object({
@@ -35,10 +35,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const approved = approvePatientReport(parsed.data);
   if (!approved) {
     return NextResponse.json({ error: "No se encontro el reporte, paciente o medico." }, { status: 404 });
   }
+  await persistState();
 
   return NextResponse.json({
     ...approved,
@@ -62,10 +64,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const updated = updatePatientReportDraft(parsed.data);
   if (!updated) {
     return NextResponse.json({ error: "No se encontro el reporte, paciente o medico." }, { status: 404 });
   }
+  await persistState();
 
   return NextResponse.json({
     ...updated,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getStateForAccess, upsertCashExpense, upsertCashTransaction, upsertPendingInvoice } from "@/lib/data";
+import { getStateForAccess, hydrateState, persistState, upsertCashExpense, upsertCashTransaction, upsertPendingInvoice } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const methodSchema = z.enum(["efectivo", "tarjeta", "sinpe", "transferencia"]);
@@ -66,6 +66,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const state = getStateForAccess(auth.user);
   return NextResponse.json({
     cashRegisters: clinicId ? state.cashRegisters.filter((item) => item.clinicId === clinicId) : state.cashRegisters,
@@ -98,12 +99,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const record =
     parsed.data.type === "payment"
       ? upsertCashTransaction(parsed.data.payment)
       : parsed.data.type === "expense"
         ? upsertCashExpense(parsed.data.expense)
         : upsertPendingInvoice(parsed.data.invoice);
+  await persistState();
 
   return NextResponse.json({
     record,

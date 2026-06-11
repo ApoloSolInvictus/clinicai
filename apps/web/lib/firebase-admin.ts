@@ -25,18 +25,17 @@ function getPrivateKey() {
   return process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 }
 
-async function getAdminAuth() {
+let firestoreSettingsApplied = false;
+
+async function getAdminApp() {
   if (!isFirebaseAdminConfigured()) {
     throw new Error("Firebase Admin no esta configurado.");
   }
 
-  const [{ cert, getApps, initializeApp }, { getAuth }] = await Promise.all([
-    import("firebase-admin/app"),
-    import("firebase-admin/auth")
-  ]);
+  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
 
   if (!getApps().length) {
-    initializeApp({
+    return initializeApp({
       credential: cert({
         projectId: process.env.FIREBASE_PROJECT_ID,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
@@ -45,7 +44,22 @@ async function getAdminAuth() {
     });
   }
 
-  return getAuth();
+  return getApps()[0];
+}
+
+async function getAdminAuth() {
+  const [{ getAuth }, app] = await Promise.all([import("firebase-admin/auth"), getAdminApp()]);
+  return getAuth(app);
+}
+
+export async function getAdminFirestore() {
+  const [{ getFirestore }, app] = await Promise.all([import("firebase-admin/firestore"), getAdminApp()]);
+  const firestore = getFirestore(app);
+  if (!firestoreSettingsApplied) {
+    firestore.settings({ ignoreUndefinedProperties: true });
+    firestoreSettingsApplied = true;
+  }
+  return firestore;
 }
 
 function stringArrayFromClaim(value: unknown) {

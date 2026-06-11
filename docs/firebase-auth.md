@@ -6,8 +6,9 @@ La Web App usa Firebase Auth para iniciar sesion y Firebase Admin para verificar
 
 1. Crea un proyecto en Firebase.
 2. En Authentication, habilita `Email/Password`.
-3. Crea una Web App dentro del proyecto.
-4. Copia la configuracion web a las variables `NEXT_PUBLIC_FIREBASE_*`.
+3. En Firestore Database, crea una base en modo produccion para persistir pacientes, medicos, citas, caja y reportes.
+4. Crea una Web App dentro del proyecto.
+5. Copia la configuracion web a las variables `NEXT_PUBLIC_FIREBASE_*`.
 
 ## 2. Variables en Vercel
 
@@ -32,6 +33,16 @@ FIREBASE_DEFAULT_CLINIC_ID=clinic-san-jose
 ```
 
 La `FIREBASE_PRIVATE_KEY` debe quedar en una sola variable. Si viene con saltos de linea escapados, usa `\n`.
+
+Persistencia:
+
+```bash
+OPENCLINIC_STATE_STORE=firestore
+OPENCLINIC_STATE_COLLECTION=openclinic
+OPENCLINIC_STATE_DOCUMENT=central-state
+```
+
+La app guarda el estado central en Firestore usando Firebase Admin. Si las credenciales `FIREBASE_*` no existen, desarrollo local cae a memoria; en produccion, configura Firestore para que los registros nuevos no se pierdan entre reinicios o redeploys.
 
 ## 3. Configurar nodos por clinica
 

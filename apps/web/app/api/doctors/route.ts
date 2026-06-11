@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getStateForAccess, replaceDoctorSchedules, upsertStaff } from "@/lib/data";
+import { getStateForAccess, hydrateState, persistState, replaceDoctorSchedules, upsertStaff } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const doctorSchema = z.object({
@@ -52,6 +52,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const state = getStateForAccess(auth.user);
   return NextResponse.json({
     doctors: state.staff.filter((member) => member.role === "medico" && (!clinicId || member.clinicId === clinicId)),
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const doctor = upsertStaff({
     ...parsed.data.doctor,
     signatureLabel:
@@ -92,6 +94,7 @@ export async function POST(request: Request) {
       specialty: schedule.specialty || doctor.specialty
     }))
   );
+  await persistState();
 
   return NextResponse.json({
     doctor,

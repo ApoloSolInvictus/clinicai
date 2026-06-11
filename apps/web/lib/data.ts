@@ -1,4 +1,5 @@
 import { getPublicClinic, getPublicClinics } from "./clinic-config";
+import { getAdminFirestore, isFirebaseAdminConfigured } from "./firebase-admin";
 
 export type TaskIntent =
   | "agenda"
@@ -1026,6 +1027,10 @@ const initialState: CentralState = {
 declare global {
   // eslint-disable-next-line no-var
   var luxAeternaState: CentralState | undefined;
+  // eslint-disable-next-line no-var
+  var luxAeternaStateHydrated: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var luxAeternaStateHydratePromise: Promise<CentralState> | undefined;
 }
 
 function makeId(prefix: string) {
@@ -1052,11 +1057,41 @@ type LegacyCashExpense = Partial<CashExpense> & Pick<CashExpense, "id" | "clinic
 
 type LegacyPendingInvoice = Partial<PendingInvoice> & Pick<PendingInvoice, "id" | "clinicId" | "patientName" | "concept" | "amount">;
 
-type RecoverableCentralState = Omit<
-  CentralState,
-  "serviceCatalog" | "appointments" | "cashTransactions" | "cashExpenses" | "pendingInvoices"
-> &
-  Partial<Pick<CentralState, "serviceCatalog" | "appointments" | "cashTransactions" | "cashExpenses" | "pendingInvoices">>;
+type RecoverableCentralState = Partial<CentralState>;
+
+type StoredCentralState = {
+  version?: number;
+  updatedAt?: string;
+  state?: RecoverableCentralState;
+};
+
+const persistentStateVersion = 1;
+
+function envIsDisabled(value: string | undefined) {
+  return value === "memory" || value === "disabled" || value === "false" || value === "0";
+}
+
+function shouldUsePersistentState() {
+  const mode = process.env.OPENCLINIC_STATE_STORE ?? process.env.OPENCLINIC_PERSISTENCE ?? "firestore";
+  return !envIsDisabled(mode) && isFirebaseAdminConfigured();
+}
+
+function stateCollectionName() {
+  return process.env.OPENCLINIC_STATE_COLLECTION || "openclinic";
+}
+
+function stateDocumentName() {
+  return process.env.OPENCLINIC_STATE_DOCUMENT || "central-state";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+async function getPersistentStateRef() {
+  const firestore = await getAdminFirestore();
+  return firestore.collection(stateCollectionName()).doc(stateDocumentName());
+}
 
 function localDateTime(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -1369,11 +1404,32 @@ function recalculateCashRegisters(state: CentralState, clinicId: string) {
 }
 
 function ensureStateShape(state: RecoverableCentralState): CentralState {
+  state.clinics ??= structuredClone(initialState.clinics);
+  state.tasks ??= structuredClone(initialState.tasks);
+  state.events ??= structuredClone(initialState.events);
+  state.roles ??= structuredClone(initialState.roles);
+  state.staff ??= structuredClone(initialState.staff);
+  state.schedules ??= structuredClone(initialState.schedules);
   state.serviceCatalog ??= structuredClone(initialState.serviceCatalog);
   state.appointments ??= structuredClone(initialState.appointments);
+  state.patients ??= structuredClone(initialState.patients);
+  state.cashRegisters ??= structuredClone(initialState.cashRegisters);
   state.cashTransactions ??= structuredClone(initialState.cashTransactions);
   state.cashExpenses ??= structuredClone(initialState.cashExpenses);
   state.pendingInvoices ??= structuredClone(initialState.pendingInvoices);
+  state.reports ??= structuredClone(initialState.reports);
+  state.automations ??= structuredClone(initialState.automations);
+  state.clinics = state.clinics.map((clinic) => {
+    const configured = getPublicClinic(clinic.id);
+    return configured
+      ? { ...clinic, name: configured.name, region: configured.region, nodeUrl: configured.nodeUrl }
+      : clinic;
+  });
+  configuredClinics.forEach((clinic) => {
+    if (!state.clinics?.some((item) => item.id === clinic.id)) {
+      state.clinics?.push(structuredClone(clinic));
+    }
+  });
   state.serviceCatalog = state.serviceCatalog.map((service) => normalizeService(service));
   state.staff = state.staff.map((member) => normalizeStaff(member));
   state.patients = state.patients.map((patient) => normalizePatient(patient));
@@ -1391,6 +1447,71 @@ export function getState() {
   }
 
   return ensureStateShape(globalThis.luxAeternaState);
+}
+
+export async function hydrateState() {
+  if (globalThis.luxAeternaStateHydrated) return getState();
+
+  if (!shouldUsePersistentState()) {
+    globalThis.luxAeternaStateHydrated = true;
+    return getState();
+  }
+
+  if (!globalThis.luxAeternaStateHydratePromise) {
+    globalThis.luxAeternaStateHydratePromise = (async () => {
+      const ref = await getPersistentStateRef();
+      const snapshot = await ref.get();
+      const data = snapshot.data() as StoredCentralState | undefined;
+      const storedState = isRecord(data?.state)
+        ? data.state
+        : isRecord(data)
+          ? (data as RecoverableCentralState)
+          : undefined;
+
+      if (snapshot.exists && storedState) {
+        globalThis.luxAeternaState = ensureStateShape(structuredClone(storedState) as RecoverableCentralState);
+        globalThis.luxAeternaStateHydrated = true;
+        return getState();
+      }
+
+      const state = getState();
+      await ref.set({
+        version: persistentStateVersion,
+        updatedAt: new Date().toISOString(),
+        state
+      });
+      globalThis.luxAeternaStateHydrated = true;
+      return state;
+    })().catch((error) => {
+      globalThis.luxAeternaStateHydratePromise = undefined;
+      globalThis.luxAeternaStateHydrated = false;
+      console.error("[openclinic] No se pudo cargar el estado persistente.", error);
+      throw error;
+    });
+  }
+
+  return globalThis.luxAeternaStateHydratePromise;
+}
+
+export async function persistState() {
+  if (!shouldUsePersistentState()) {
+    globalThis.luxAeternaStateHydrated = true;
+    return getState();
+  }
+
+  if (!globalThis.luxAeternaStateHydrated) {
+    await hydrateState();
+  }
+
+  const state = getState();
+  const ref = await getPersistentStateRef();
+  await ref.set({
+    version: persistentStateVersion,
+    updatedAt: new Date().toISOString(),
+    state
+  });
+
+  return state;
 }
 
 export function getStateForAccess(access: { allClinics: boolean; clinicIds: string[] }) {

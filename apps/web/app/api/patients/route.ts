@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getStateForAccess, upsertPatient } from "@/lib/data";
+import { getStateForAccess, hydrateState, persistState, upsertPatient } from "@/lib/data";
 import { canAccessClinic, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 const channelSchema = z.enum(["email", "whatsapp"]);
@@ -73,6 +73,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const state = getStateForAccess(auth.user);
   const patients = clinicId ? state.patients.filter((patient) => patient.clinicId === clinicId) : state.patients;
   return NextResponse.json({ patients });
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const patient = upsertPatient({
     ...parsed.data,
     reports: parsed.data.reports.map((report) => ({
@@ -105,6 +107,7 @@ export async function POST(request: Request) {
       id: instruction.id ?? makeNestedId("patins")
     }))
   });
+  await persistState();
 
   return NextResponse.json({
     patient,

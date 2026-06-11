@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getClinicNodeConfig, getLocalNodeUrlHint, isCloudRuntime, isLocalNodeUrl } from "@/lib/clinic-config";
-import { addEvent, getState, patchClinic } from "@/lib/data";
+import { addEvent, getState, hydrateState, patchClinic, persistState } from "@/lib/data";
 import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } from "@/lib/firebase-admin";
 
 export async function POST(request: Request) {
@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tienes acceso a esta clinica." }, { status: 403 });
   }
 
+  await hydrateState();
   const node = getClinicNodeConfig(clinicId);
   if (!node?.nodeUrl) {
     return NextResponse.json({ error: "La clinica no tiene nodo local configurado." }, { status: 400 });
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
       status: "online",
       lastSync: new Date().toISOString()
     });
+    await persistState();
 
     return NextResponse.json({ state: getState(), result });
   } catch (error) {

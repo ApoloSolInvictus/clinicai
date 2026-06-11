@@ -22,6 +22,8 @@ Configura estas variables en `Production` y `Preview`:
 - `CLINIC_NODE_CONFIG_JSON`: overrides multi-clinica con URL, nombre o token por Docker local.
 - `NEXT_PUBLIC_FIREBASE_*`: configuracion web de Firebase Auth.
 - `FIREBASE_*`: credenciales de Firebase Admin para verificar tokens.
+- `OPENCLINIC_STATE_STORE`: usa `firestore` en produccion para persistir el estado central.
+- `OPENCLINIC_STATE_COLLECTION` y `OPENCLINIC_STATE_DOCUMENT`: ubicacion del documento Firestore; por defecto `openclinic/central-state`.
 
 Para una demo rapida, `LOCAL_NODE_URL` puede apuntar a un tunel HTTPS temporal hacia `http://localhost:8787`. Para desarrollo local con archivo hosts, usa `http://clinic-san-jose.node:8787`. Para produccion, usa un dominio publico por clinica, VPN, mTLS, Cloudflare Tunnel, Tailscale Funnel, reverse proxy seguro o un modelo de pull donde el nodo local consulte tareas salientes. Si configuras `clinic-san-jose.node` sin protocolo, la app lo normaliza a `https://clinic-san-jose.node`, lo cual requiere que exista un listener HTTPS en 443.
 
@@ -62,6 +64,8 @@ Si Vercel pregunta por directorio, selecciona `apps/web`.
 4. El nodo Docker local ejecuta OpenClaw y responde.
 5. Vercel actualiza el tablero con resultado y sincronizacion.
 
-## Nota importante
+## Persistencia central
 
-El prototipo mantiene estado en memoria para demo. En produccion se debe agregar una base de datos central para usuarios, clinicas, tareas, auditoria y reportes persistentes.
+La Web App guarda pacientes, medicos, citas, caja, tareas y reportes en Firestore cuando Firebase Admin esta configurado. Antes de publicar, crea Firestore Database en el proyecto Firebase y verifica que Vercel tenga `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` y `OPENCLINIC_STATE_STORE=firestore`.
+
+En desarrollo local sin credenciales Firebase Admin, la app conserva el fallback de memoria para demos rapidas.
