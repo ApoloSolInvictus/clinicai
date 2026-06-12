@@ -2153,6 +2153,122 @@ body::-webkit-scrollbar-thumb {
   overflow-wrap: anywhere;
 }
 
+.btn.danger {
+  border-color: rgba(251, 113, 133, 0.35);
+  color: #fecdd3;
+  background: rgba(190, 18, 60, 0.14);
+}
+
+.btn.danger:hover:not(:disabled) {
+  border-color: rgba(251, 113, 133, 0.55);
+  background: rgba(190, 18, 60, 0.22);
+}
+
+.service-toolbar,
+.service-list-item,
+.service-list-pricing {
+  display: flex;
+  align-items: center;
+}
+
+.service-toolbar {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.service-toolbar p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.service-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.service-summary-grid .reader-block {
+  min-height: 92px;
+}
+
+.service-summary-grid .reader-block span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.service-workspace {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.service-directory,
+.service-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.service-list-item {
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel-strong);
+  text-align: left;
+}
+
+.service-list-item:hover,
+.service-list-item.active {
+  border-color: rgba(56, 189, 248, 0.42);
+  background: rgba(14, 165, 233, 0.11);
+}
+
+.service-list-item > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.service-list-item strong,
+.service-list-item span {
+  overflow-wrap: anywhere;
+}
+
+.service-list-item strong {
+  font-size: 13px;
+}
+
+.service-list-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.service-list-pricing {
+  flex: 0 0 auto;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.service-price-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.service-table {
+  min-width: 860px;
+}
+
 @media (max-width: 1180px) {
   .auth-shell {
     grid-template-columns: 1fr;
@@ -2199,6 +2315,9 @@ body::-webkit-scrollbar-thumb {
   .doctor-report-reader,
   .medical-reports-workflow,
   .doctor-service-grid,
+  .service-summary-grid,
+  .service-workspace,
+  .service-price-grid,
   .patient-context-grid,
   .schedule-editor-row,
   .patient-workspace,
@@ -2260,6 +2379,9 @@ body::-webkit-scrollbar-thumb {
   .appointment-form-grid,
   .patient-form-grid,
   .patient-form-grid-compact,
+  .service-summary-grid,
+  .service-workspace,
+  .service-price-grid,
   .accounting-period-grid,
   .accounting-ledger-grid,
   .segmented-control,
@@ -2273,6 +2395,8 @@ body::-webkit-scrollbar-thumb {
   .surface-row,
   .agenda-toolbar,
   .patient-toolbar,
+  .service-toolbar,
+  .service-list-item,
   .patient-editor-header,
   .section-title-row,
   .inline-actions,

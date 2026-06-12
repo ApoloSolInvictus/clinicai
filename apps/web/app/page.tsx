@@ -19,6 +19,7 @@ import {
   FileText,
   HeartPulse,
   KeyRound,
+  ListChecks,
   LogIn,
   LogOut,
   Mail,
@@ -79,6 +80,7 @@ type ModuleId =
   | "agenda"
   | "pacientes"
   | "medicos"
+  | "servicios"
   | "caja"
   | "reportes"
   | "automatizaciones"
@@ -131,6 +133,7 @@ type AccountingPeriodSummary = {
   pendingInvoices: number;
   pendingInvoiceTotal: number;
   doctorHonorarium: number;
+  taxCollected: number;
   paymentsCount: number;
   expensesCount: number;
   methodTotals: Record<CashTransaction["method"], number>;
@@ -393,6 +396,7 @@ const navItems: NavItem[] = [
   { id: "agenda", icon: CalendarDays, label: "Agenda" },
   { id: "pacientes", icon: Users, label: "Pacientes" },
   { id: "medicos", icon: UserCog, label: "Medicos" },
+  { id: "servicios", icon: ListChecks, label: "Servicios" },
   { id: "caja", icon: BadgeDollarSign, label: "Caja" },
   { id: "reportes", icon: BarChart3, label: "Reportes" },
   { id: "automatizaciones", icon: Bot, label: "Automatizaciones" },
@@ -404,6 +408,7 @@ const moduleCopy: Record<ModuleId, string> = {
   agenda: "Citas, horas y conflictos",
   pacientes: "Historial, documentos y aprobaciones",
   medicos: "Personal medico y horas verificadas",
+  servicios: "Catalogo, precios, IVA y honorarios",
   caja: "Cierres y control financiero",
   reportes: "Entregables para administracion",
   automatizaciones: "Ordenes listas para OpenClaw",
@@ -425,6 +430,30 @@ function money(value: number, currency: string) {
     currency,
     maximumFractionDigits: 0
   }).format(value);
+}
+
+function calculateIvaAmount(subtotal: number, ivaRate: number) {
+  return Math.round(subtotal * (ivaRate / 100));
+}
+
+function serviceTotal(service: Pick<ServiceCatalogItem, "price" | "ivaRate">) {
+  return service.price + calculateIvaAmount(service.price, service.ivaRate);
+}
+
+function createEmptyService(clinicId: string): ServiceCatalogItem {
+  return {
+    id: "",
+    clinicId,
+    name: "",
+    specialty: "Medicina general",
+    durationMinutes: 30,
+    price: 0,
+    ivaRate: 0,
+    currency: "CRC",
+    doctorHonorarium: 0,
+    preparationInstructions: "",
+    requiresReportApproval: true
+  };
 }
 
 function splitList(value: string) {
@@ -545,6 +574,9 @@ function createEmptyAppointment(
   const service = services[0];
   const startsAt = defaultAppointmentStart();
   const duration = service?.durationMinutes ?? 30;
+  const serviceSubtotal = service?.price ?? 0;
+  const ivaRate = service?.ivaRate ?? 0;
+  const ivaAmount = calculateIvaAmount(serviceSubtotal, ivaRate);
 
   return {
     id: "",
@@ -557,7 +589,10 @@ function createEmptyAppointment(
     serviceName: service?.name ?? "",
     startsAt,
     endsAt: addMinutesToInput(startsAt, duration),
-    price: service?.price ?? 0,
+    serviceSubtotal,
+    ivaRate,
+    ivaAmount,
+    price: serviceSubtotal + ivaAmount,
     currency: service?.currency ?? "CRC",
     doctorHonorarium: service?.doctorHonorarium ?? 0,
     status: "solicitada",
@@ -762,6 +797,12 @@ function buildAccountingSummaries({
       totals[payment.method] += payment.amount;
       return totals;
     }, emptyMethodTotals());
+    const paidAppointmentIds = new Set(
+      periodPayments.map((payment) => payment.appointmentId).filter((appointmentId): appointmentId is string => Boolean(appointmentId))
+    );
+    const taxCollected = appointments
+      .filter((appointment) => paidAppointmentIds.has(appointment.id))
+      .reduce((total, appointment) => total + appointment.ivaAmount, 0);
     const doctorHonorarium = staff
       .filter((member) => member.role === "medico")
       .reduce((total, doctor) => {
@@ -783,6 +824,7 @@ function buildAccountingSummaries({
       pendingInvoices,
       pendingInvoiceTotal: pendingPeriodInvoices.reduce((total, invoice) => total + invoice.amount, 0),
       doctorHonorarium,
+      taxCollected,
       paymentsCount: periodPayments.length,
       expensesCount: periodExpenses.length,
       methodTotals,
@@ -1004,6 +1046,58 @@ export default function Home() {
     }
   }
 
+  async function saveService(service: ServiceCatalogItem) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/services", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
+        body: JSON.stringify({
+          ...service,
+          id: service.id || undefined,
+          clinicId
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo guardar el servicio.");
+      }
+
+      setState(payload.state);
+      setResult(JSON.stringify({ service: payload.service, saved: true }, null, 2));
+      return payload.service as ServiceCatalogItem;
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo guardar el servicio.");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeService(service: ServiceCatalogItem) {
+    setBusy(true);
+    try {
+      const params = new URLSearchParams({ clinicId, serviceId: service.id });
+      const response = await fetch(`/api/services?${params.toString()}`, {
+        method: "DELETE",
+        headers: await session.getAuthHeaders()
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo eliminar el servicio.");
+      }
+
+      setState(payload.state);
+      setResult(JSON.stringify({ service: payload.service, deleted: true }, null, 2));
+      return true;
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : "No se pudo eliminar el servicio.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAppointment(appointment: AppointmentRecord) {
     setBusy(true);
     try {
@@ -1118,6 +1212,12 @@ export default function Home() {
     const completedPayments = clinicPayments.filter((payment) => payment.status === "completado");
     const pendingInvoices = clinicInvoices.filter((invoice) => invoice.status === "pendiente");
     const paidExpenses = clinicExpenses.filter((expense) => expense.status !== "pendiente");
+    const taxCollected = clinicAppointments
+      .filter(
+        (appointment) =>
+          appointment.paymentStatus !== "pendiente" && isInsideAccountingPeriod(appointment.startsAt, period)
+      )
+      .reduce((total, appointment) => total + appointment.ivaAmount, 0);
     const doctorPayments = clinicStaff
       .filter((member) => member.role === "medico")
       .map((doctor) => {
@@ -1135,6 +1235,7 @@ export default function Home() {
       prompt:
         `Prepara cierre de caja ${period} en colones costarricenses para el contador. ` +
         `Ingresos registrados: ${money(register?.revenue ?? 0, "CRC")}. Gastos: ${money(register?.expenses ?? 0, "CRC")}. ` +
+        `IVA registrado en servicios cobrados: ${money(taxCollected, "CRC")}. ` +
         `Facturas pendientes: ${pendingInvoices.length}. Pagos completados: ${completedPayments.length}. Gastos registrados: ${paidExpenses.length}. ` +
         `Metodos de pago: efectivo ${completedPayments.filter((item) => item.method === "efectivo").length}, tarjeta ${completedPayments.filter((item) => item.method === "tarjeta").length}, SINPE ${completedPayments.filter((item) => item.method === "sinpe").length}. ` +
         `Honorarios medicos:\n${doctorPayments || "Sin honorarios medicos registrados."}\n` +
@@ -1684,6 +1785,7 @@ export default function Home() {
             {activeModule === "pacientes" ? (
               <PatientsModule
                 patients={clinicPatients}
+                services={clinicServices}
                 clinicId={clinicId}
                 busy={busy}
                 focus={workFocus?.module === "pacientes" ? workFocus : null}
@@ -1708,6 +1810,17 @@ export default function Home() {
                 onApproveReport={approveReportAndPrepareDelivery}
                 onSaveMedicalDictation={saveMedicalDictation}
                 onReviewMedicalDictation={reviewMedicalDictation}
+              />
+            ) : null}
+            {activeModule === "servicios" ? (
+              <ServicesModule
+                services={clinicServices}
+                appointments={clinicAppointments}
+                staff={clinicStaff}
+                clinicId={clinicId}
+                busy={busy}
+                onSaveService={saveService}
+                onDeleteService={removeService}
               />
             ) : null}
             {activeModule === "caja" ? (
@@ -2025,12 +2138,18 @@ function AgendaModule({
 
   function setService(serviceId: string) {
     const service = services.find((item) => item.id === serviceId);
+    const serviceSubtotal = service?.price ?? draft.serviceSubtotal;
+    const ivaRate = service?.ivaRate ?? draft.ivaRate;
+    const ivaAmount = calculateIvaAmount(serviceSubtotal, ivaRate);
     setDraft((current) => ({
       ...current,
       serviceId,
       serviceName: service?.name ?? current.serviceName,
       endsAt: addMinutesToInput(current.startsAt, service?.durationMinutes ?? 30),
-      price: service?.price ?? current.price,
+      serviceSubtotal,
+      ivaRate,
+      ivaAmount,
+      price: serviceSubtotal + ivaAmount,
       currency: service?.currency ?? current.currency,
       doctorHonorarium: service?.doctorHonorarium ?? current.doctorHonorarium,
       reportDeliveryStatus: service?.requiresReportApproval ? "aprobacion-medica" : current.reportDeliveryStatus,
@@ -2230,7 +2349,7 @@ function AgendaModule({
                     <option value="">Seleccionar servicio</option>
                     {services.map((service) => (
                       <option value={service.id} key={service.id}>
-                        {service.name} - {money(service.price, service.currency)}
+                        {service.name} - {money(serviceTotal(service), service.currency)}
                       </option>
                     ))}
                   </select>
@@ -2286,14 +2405,52 @@ function AgendaModule({
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor="appointment-price">Precio</label>
+                  <label htmlFor="appointment-subtotal">Subtotal</label>
                   <input
-                    id="appointment-price"
+                    id="appointment-subtotal"
                     type="number"
                     min="0"
-                    value={draft.price}
-                    onChange={(event) => updateDraft("price", Number(event.target.value))}
+                    value={draft.serviceSubtotal}
+                    onChange={(event) => {
+                      const serviceSubtotal = Number(event.target.value);
+                      const ivaAmount = calculateIvaAmount(serviceSubtotal, draft.ivaRate);
+                      setDraft((current) => ({
+                        ...current,
+                        serviceSubtotal,
+                        ivaAmount,
+                        price: serviceSubtotal + ivaAmount
+                      }));
+                    }}
                   />
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-iva-rate">IVA %</label>
+                  <input
+                    id="appointment-iva-rate"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={draft.ivaRate}
+                    onChange={(event) => {
+                      const ivaRate = Number(event.target.value);
+                      const ivaAmount = calculateIvaAmount(draft.serviceSubtotal, ivaRate);
+                      setDraft((current) => ({
+                        ...current,
+                        ivaRate,
+                        ivaAmount,
+                        price: current.serviceSubtotal + ivaAmount
+                      }));
+                    }}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-iva-amount">Monto IVA</label>
+                  <input id="appointment-iva-amount" value={money(draft.ivaAmount, draft.currency)} readOnly />
+                </div>
+                <div className="field">
+                  <label htmlFor="appointment-price">Total al paciente</label>
+                  <input id="appointment-price" value={money(draft.price, draft.currency)} readOnly />
                 </div>
                 <div className="field">
                   <label htmlFor="appointment-honorarium">Honorario medico</label>
@@ -2411,7 +2568,8 @@ function AgendaModule({
                   </p>
                 </div>
                 <div className="row-metrics">
-                  <span>{money(service.price, service.currency)}</span>
+                  <span>{money(serviceTotal(service), service.currency)} total</span>
+                  <span>{service.ivaRate}% IVA</span>
                   <span>{money(service.doctorHonorarium, service.currency)} medico</span>
                 </div>
               </div>
@@ -2440,6 +2598,7 @@ function AgendaModule({
 
 function PatientsModule({
   patients,
+  services,
   clinicId,
   busy,
   focus,
@@ -2449,6 +2608,7 @@ function PatientsModule({
   onPrepareClinicalDocuments
 }: {
   patients: PatientRecord[];
+  services: ServiceCatalogItem[];
   clinicId: string;
   busy: boolean;
   focus: WorkFocus | null;
@@ -2560,7 +2720,7 @@ function PatientsModule({
   }
 
   function addInstruction() {
-    const service = instructionDraft.service.trim();
+    const service = (instructionDraft.service || draft.nextService).trim();
     const text = instructionDraft.text.trim();
     if (!service || !text) return;
 
@@ -2840,11 +3000,21 @@ function PatientsModule({
                 </div>
                 <div className="field">
                   <label htmlFor="patient-service">Servicio</label>
-                  <input
+                  <select
                     id="patient-service"
                     value={draft.nextService}
                     onChange={(event) => updateDraft("nextService", event.target.value)}
-                  />
+                  >
+                    <option value="">Seleccionar servicio</option>
+                    {draft.nextService && !services.some((service) => service.name === draft.nextService) ? (
+                      <option value={draft.nextService}>{draft.nextService}</option>
+                    ) : null}
+                    {services.map((service) => (
+                      <option value={service.name} key={service.id}>
+                        {service.name} - {money(serviceTotal(service), service.currency)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="field">
                   <label htmlFor="patient-doctor">Medico asignado</label>
@@ -3051,12 +3221,21 @@ function PatientsModule({
               <div className="patient-form-grid patient-form-grid-compact">
                 <div className="field">
                   <label htmlFor="instruction-service">Servicio</label>
-                  <input
+                  <select
                     id="instruction-service"
                     value={instructionDraft.service}
                     onChange={(event) => setInstructionDraft((current) => ({ ...current, service: event.target.value }))}
-                    placeholder={draft.nextService || "Servicio"}
-                  />
+                  >
+                    <option value="">{draft.nextService || "Seleccionar servicio"}</option>
+                    {instructionDraft.service && !services.some((service) => service.name === instructionDraft.service) ? (
+                      <option value={instructionDraft.service}>{instructionDraft.service}</option>
+                    ) : null}
+                    {services.map((service) => (
+                      <option value={service.name} key={service.id}>
+                        {service.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="field">
                   <label htmlFor="instruction-category">Categoria</label>
@@ -3594,7 +3773,7 @@ function DoctorsModule({
                       <span>
                         <strong>{service.name}</strong>
                         <small>
-                          {money(service.price, service.currency)} - {money(service.doctorHonorarium, service.currency)} medico
+                          {money(serviceTotal(service), service.currency)} total - {service.ivaRate}% IVA - {money(service.doctorHonorarium, service.currency)} medico
                         </small>
                       </span>
                     </label>
@@ -4193,6 +4372,347 @@ function MedicalDictationPanel({
   );
 }
 
+function ServicesModule({
+  services,
+  appointments,
+  staff,
+  clinicId,
+  busy,
+  onSaveService,
+  onDeleteService
+}: {
+  services: ServiceCatalogItem[];
+  appointments: AppointmentRecord[];
+  staff: StaffMember[];
+  clinicId: string;
+  busy: boolean;
+  onSaveService: (service: ServiceCatalogItem) => Promise<ServiceCatalogItem | undefined>;
+  onDeleteService: (service: ServiceCatalogItem) => Promise<boolean>;
+}) {
+  const [selectedServiceId, setSelectedServiceId] = useState(services[0]?.id ?? "");
+  const [mode, setMode] = useState<"existing" | "new">(services.length > 0 ? "existing" : "new");
+  const selectedService = services.find((service) => service.id === selectedServiceId);
+  const firstService = services[0];
+  const [draft, setDraft] = useState<ServiceCatalogItem>(() => selectedService ?? createEmptyService(clinicId));
+  const ivaAmount = calculateIvaAmount(draft.price, draft.ivaRate);
+  const total = draft.price + ivaAmount;
+  const clinicMargin = Math.max(0, draft.price - draft.doctorHonorarium);
+  const serviceAppointments = appointments.filter((appointment) => appointment.serviceId === draft.id);
+  const authorizedDoctors = staff.filter((member) => member.role === "medico" && member.serviceIds.includes(draft.id));
+  const catalogTotals = services.reduce(
+    (summary, service) => ({
+      billed: summary.billed + serviceTotal(service),
+      iva: summary.iva + calculateIvaAmount(service.price, service.ivaRate),
+      honorarium: summary.honorarium + service.doctorHonorarium
+    }),
+    { billed: 0, iva: 0, honorarium: 0 }
+  );
+
+  useEffect(() => {
+    if (mode === "new") {
+      setDraft(createEmptyService(clinicId));
+      return;
+    }
+
+    const next = selectedService ?? firstService;
+    if (next) {
+      setSelectedServiceId(next.id);
+      setDraft({ ...next });
+    } else {
+      setMode("new");
+      setSelectedServiceId("");
+      setDraft(createEmptyService(clinicId));
+    }
+  }, [clinicId, firstService, mode, selectedService]);
+
+  function updateDraft<Key extends keyof ServiceCatalogItem>(field: Key, value: ServiceCatalogItem[Key]) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewService() {
+    setMode("new");
+    setSelectedServiceId("");
+    setDraft(createEmptyService(clinicId));
+  }
+
+  function selectService(service: ServiceCatalogItem) {
+    setMode("existing");
+    setSelectedServiceId(service.id);
+    setDraft({ ...service });
+  }
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const saved = await onSaveService({ ...draft, clinicId, currency: "CRC" });
+    if (!saved) return;
+
+    setMode("existing");
+    setSelectedServiceId(saved.id);
+    setDraft({ ...saved });
+  }
+
+  async function handleDelete() {
+    if (!draft.id) return;
+    const confirmed = window.confirm(
+      `Eliminar "${draft.name}" del catalogo? Las citas anteriores conservaran sus precios y datos contables.`
+    );
+    if (!confirmed) return;
+
+    const deleted = await onDeleteService(draft);
+    if (deleted) startNewService();
+  }
+
+  return (
+    <div className="grid">
+      <Panel icon={ListChecks} title="Catalogo de servicios">
+        <div className="service-toolbar">
+          <div>
+            <strong>{services.length} servicios disponibles</strong>
+            <p>Los importes nuevos se aplican a citas futuras pendientes; los historicos quedan intactos.</p>
+          </div>
+          <button className="btn primary" type="button" onClick={startNewService} title="Agregar servicio">
+            <Plus size={18} />
+            Nuevo servicio
+          </button>
+        </div>
+
+        <div className="service-summary-grid">
+          <div className="reader-block">
+            <span>Catalogo con IVA</span>
+            <strong>{money(catalogTotals.billed, "CRC")}</strong>
+          </div>
+          <div className="reader-block">
+            <span>IVA por una venta de cada servicio</span>
+            <strong>{money(catalogTotals.iva, "CRC")}</strong>
+          </div>
+          <div className="reader-block">
+            <span>Honorarios por una venta de cada servicio</span>
+            <strong>{money(catalogTotals.honorarium, "CRC")}</strong>
+          </div>
+        </div>
+
+        <div className="service-workspace">
+          <div className="service-directory">
+            {services.map((service) => {
+              const serviceIva = calculateIvaAmount(service.price, service.ivaRate);
+              const doctorsCount = staff.filter(
+                (member) => member.role === "medico" && member.serviceIds.includes(service.id)
+              ).length;
+              return (
+                <button
+                  className={`service-list-item ${mode === "existing" && selectedServiceId === service.id ? "active" : ""}`}
+                  type="button"
+                  key={service.id}
+                  onClick={() => selectService(service)}
+                >
+                  <div>
+                    <strong>{service.name}</strong>
+                    <span>{service.specialty} - {service.durationMinutes} min</span>
+                  </div>
+                  <div className="service-list-pricing">
+                    <strong>{money(service.price + serviceIva, service.currency)}</strong>
+                    <span>IVA {service.ivaRate}% - {doctorsCount} medicos</span>
+                  </div>
+                </button>
+              );
+            })}
+            {services.length === 0 ? <div className="empty-state">Agrega el primer servicio de esta clinica.</div> : null}
+          </div>
+
+          <form className="service-editor" onSubmit={handleSave}>
+            <div className="patient-editor-header">
+              <div>
+                <h3>{draft.id ? "Editar servicio" : "Nuevo servicio"}</h3>
+                <p>{draft.name || "Define el servicio, sus impuestos y el honorario medico."}</p>
+              </div>
+              <div className="button-row">
+                {draft.id ? (
+                  <button className="btn danger" type="button" onClick={handleDelete} disabled={busy} title="Eliminar servicio">
+                    <Trash2 size={18} />
+                    Eliminar
+                  </button>
+                ) : null}
+                <button className="btn primary" type="submit" disabled={busy} title="Guardar servicio">
+                  <Save size={18} />
+                  {busy ? "Guardando" : "Guardar"}
+                </button>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <div className="appointment-form-grid">
+                <div className="field">
+                  <label htmlFor="service-name">Nombre</label>
+                  <input
+                    id="service-name"
+                    value={draft.name}
+                    onChange={(event) => updateDraft("name", event.target.value)}
+                    maxLength={140}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-specialty">Especialidad</label>
+                  <input
+                    id="service-specialty"
+                    value={draft.specialty}
+                    onChange={(event) => updateDraft("specialty", event.target.value)}
+                    maxLength={140}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-duration">Duracion en minutos</label>
+                  <input
+                    id="service-duration"
+                    type="number"
+                    min="5"
+                    max="1440"
+                    step="5"
+                    value={draft.durationMinutes}
+                    onChange={(event) => updateDraft("durationMinutes", Number(event.target.value))}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-currency">Moneda</label>
+                  <input id="service-currency" value="CRC - Colon costarricense" readOnly />
+                </div>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <div className="section-title-row">
+                <h3>Precio e impuestos</h3>
+                <span className="status-chip activo">Total {money(total, "CRC")}</span>
+              </div>
+              <div className="service-price-grid">
+                <div className="field">
+                  <label htmlFor="service-price">Precio antes de IVA</label>
+                  <input
+                    id="service-price"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={draft.price}
+                    onChange={(event) => updateDraft("price", Number(event.target.value))}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-iva">IVA %</label>
+                  <input
+                    id="service-iva"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={draft.ivaRate}
+                    onChange={(event) => updateDraft("ivaRate", Number(event.target.value))}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-iva-amount">Monto IVA</label>
+                  <input id="service-iva-amount" value={money(ivaAmount, "CRC")} readOnly />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-total">Total al paciente</label>
+                  <input id="service-total" value={money(total, "CRC")} readOnly />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-honorarium">Honorario medico</label>
+                  <input
+                    id="service-honorarium"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={draft.doctorHonorarium}
+                    onChange={(event) => updateDraft("doctorHonorarium", Number(event.target.value))}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="service-margin">Margen clinica antes de gastos</label>
+                  <input id="service-margin" value={money(clinicMargin, "CRC")} readOnly />
+                </div>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <div className="section-title-row">
+                <h3>Operacion clinica</h3>
+                <span className="status-chip">{authorizedDoctors.length} medicos - {serviceAppointments.length} citas</span>
+              </div>
+              <div className="field">
+                <label htmlFor="service-preparation">Preparacion e instrucciones</label>
+                <textarea
+                  id="service-preparation"
+                  value={draft.preparationInstructions}
+                  onChange={(event) => updateDraft("preparationInstructions", event.target.value)}
+                  maxLength={1600}
+                />
+              </div>
+              <div className="checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={draft.requiresReportApproval}
+                    onChange={(event) => updateDraft("requiresReportApproval", event.target.checked)}
+                  />
+                  <FileText size={16} />
+                  Requiere aprobacion de reporte medico
+                </label>
+              </div>
+            </div>
+          </form>
+        </div>
+      </Panel>
+
+      <Panel icon={BadgeDollarSign} title="Uso financiero y clinico">
+        <div className="table-wrap">
+          <table className="data-table service-table">
+            <thead>
+              <tr>
+                <th>Servicio</th>
+                <th>Subtotal</th>
+                <th>IVA</th>
+                <th>Total</th>
+                <th>Honorario</th>
+                <th>Medicos</th>
+                <th>Citas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((service) => {
+                const tax = calculateIvaAmount(service.price, service.ivaRate);
+                return (
+                  <tr key={service.id}>
+                    <td>
+                      <strong>{service.name}</strong>
+                      <span>{service.specialty} - {service.durationMinutes} min</span>
+                    </td>
+                    <td>{money(service.price, "CRC")}</td>
+                    <td>
+                      {money(tax, "CRC")}
+                      <span>{service.ivaRate}%</span>
+                    </td>
+                    <td>{money(service.price + tax, "CRC")}</td>
+                    <td>{money(service.doctorHonorarium, "CRC")}</td>
+                    <td>{staff.filter((member) => member.role === "medico" && member.serviceIds.includes(service.id)).length}</td>
+                    <td>{appointments.filter((appointment) => appointment.serviceId === service.id).length}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {services.length === 0 ? <div className="empty-state">El catalogo aun no tiene servicios.</div> : null}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 function CashModule({
   cashRegisters,
   payments,
@@ -4455,6 +4975,10 @@ function CashModule({
                   <div className="mini-stat">
                     <span>Honorarios medicos</span>
                     <b>{money(selectedSummary.doctorHonorarium, "CRC")}</b>
+                  </div>
+                  <div className="mini-stat">
+                    <span>IVA cobrado</span>
+                    <b>{money(selectedSummary.taxCollected, "CRC")}</b>
                   </div>
                   <div className="mini-stat">
                     <span>Facturas pendientes</span>

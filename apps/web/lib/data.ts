@@ -89,10 +89,15 @@ export type ServiceCatalogItem = {
   specialty: string;
   durationMinutes: number;
   price: number;
+  ivaRate: number;
   currency: string;
   doctorHonorarium: number;
   preparationInstructions: string;
   requiresReportApproval: boolean;
+};
+
+export type ServiceCatalogUpsertInput = Omit<ServiceCatalogItem, "id"> & {
+  id?: string;
 };
 
 export type AppointmentRecord = {
@@ -106,6 +111,9 @@ export type AppointmentRecord = {
   serviceName: string;
   startsAt: string;
   endsAt: string;
+  serviceSubtotal: number;
+  ivaRate: number;
+  ivaAmount: number;
   price: number;
   currency: string;
   doctorHonorarium: number;
@@ -525,6 +533,7 @@ const initialState: CentralState = {
       specialty: "Medicina general",
       durationMinutes: 30,
       price: 37500,
+      ivaRate: 0,
       currency: "CRC",
       doctorHonorarium: 22500,
       preparationInstructions: "Llegar 15 minutos antes con documento de identidad y lista de medicamentos activos.",
@@ -537,6 +546,7 @@ const initialState: CentralState = {
       specialty: "Cardiologia",
       durationMinutes: 45,
       price: 55000,
+      ivaRate: 0,
       currency: "CRC",
       doctorHonorarium: 32500,
       preparationInstructions: "Traer examenes previos y evitar cafeina 4 horas antes si se solicitara electrocardiograma.",
@@ -549,6 +559,7 @@ const initialState: CentralState = {
       specialty: "Laboratorio",
       durationMinutes: 45,
       price: 47500,
+      ivaRate: 0,
       currency: "CRC",
       doctorHonorarium: 25000,
       preparationInstructions: "Ayuno de 8 horas cuando aplique. Confirmar medicamentos activos antes de enviar instrucciones.",
@@ -561,6 +572,7 @@ const initialState: CentralState = {
       specialty: "Medicina general",
       durationMinutes: 45,
       price: 45000,
+      ivaRate: 0,
       currency: "CRC",
       doctorHonorarium: 27500,
       preparationInstructions: "Traer inhaladores actuales y anotar sintomas de los ultimos 7 dias.",
@@ -579,6 +591,9 @@ const initialState: CentralState = {
       serviceName: "Consulta general",
       startsAt: "2026-06-10T09:30",
       endsAt: "2026-06-10T10:00",
+      serviceSubtotal: 37500,
+      ivaRate: 0,
+      ivaAmount: 0,
       price: 37500,
       currency: "CRC",
       doctorHonorarium: 22500,
@@ -602,6 +617,9 @@ const initialState: CentralState = {
       serviceName: "Laboratorio y control",
       startsAt: "2026-06-11T11:00",
       endsAt: "2026-06-11T11:45",
+      serviceSubtotal: 47500,
+      ivaRate: 0,
+      ivaAmount: 0,
       price: 47500,
       currency: "CRC",
       doctorHonorarium: 25000,
@@ -625,6 +643,9 @@ const initialState: CentralState = {
       serviceName: "Seguimiento respiratorio",
       startsAt: "2026-06-14T15:00",
       endsAt: "2026-06-14T15:45",
+      serviceSubtotal: 45000,
+      ivaRate: 0,
+      ivaAmount: 0,
       price: 45000,
       currency: "CRC",
       doctorHonorarium: 27500,
@@ -1046,6 +1067,9 @@ type LegacyPatientRecord = Partial<PatientRecord> &
 
 type LegacyStaffMember = Partial<StaffMember> & Pick<StaffMember, "id" | "clinicId" | "name" | "role" | "email">;
 
+type LegacyServiceCatalogItem = Partial<ServiceCatalogItem> &
+  Pick<ServiceCatalogItem, "id" | "clinicId" | "name" | "specialty" | "durationMinutes" | "price" | "currency" | "doctorHonorarium">;
+
 type LegacyAppointmentRecord = Partial<AppointmentRecord> &
   Pick<
     AppointmentRecord,
@@ -1123,12 +1147,19 @@ function crcCurrency() {
   return "CRC";
 }
 
-function normalizeService(service: ServiceCatalogItem): ServiceCatalogItem {
+function calculateIvaAmount(subtotal: number, ivaRate: number) {
+  return Math.round(subtotal * (ivaRate / 100));
+}
+
+function normalizeService(service: LegacyServiceCatalogItem): ServiceCatalogItem {
   return {
     ...service,
     price: crcAmount(service.price, service.currency),
+    ivaRate: Math.max(0, Math.min(100, Number(service.ivaRate ?? 0))),
     currency: crcCurrency(),
-    doctorHonorarium: crcAmount(service.doctorHonorarium, service.currency)
+    doctorHonorarium: crcAmount(service.doctorHonorarium, service.currency),
+    preparationInstructions: service.preparationInstructions ?? "",
+    requiresReportApproval: service.requiresReportApproval ?? true
   };
 }
 
@@ -1219,6 +1250,9 @@ function normalizeAppointment(appointment: LegacyAppointmentRecord): Appointment
   const startsAt = appointment.startsAt;
   const duration = service?.durationMinutes ?? 30;
   const sourceCurrency = appointment.currency ?? service?.currency ?? "CRC";
+  const serviceSubtotal = crcAmount(appointment.serviceSubtotal ?? appointment.price ?? service?.price, sourceCurrency);
+  const ivaRate = Math.max(0, Math.min(100, Number(appointment.ivaRate ?? 0)));
+  const ivaAmount = crcAmount(appointment.ivaAmount ?? calculateIvaAmount(serviceSubtotal, ivaRate), sourceCurrency);
 
   return {
     id: appointment.id,
@@ -1231,7 +1265,10 @@ function normalizeAppointment(appointment: LegacyAppointmentRecord): Appointment
     serviceName: appointment.serviceName,
     startsAt,
     endsAt: appointment.endsAt ?? addMinutes(startsAt, duration),
-    price: crcAmount(appointment.price ?? service?.price, sourceCurrency),
+    serviceSubtotal,
+    ivaRate,
+    ivaAmount,
+    price: crcAmount(appointment.price ?? serviceSubtotal + ivaAmount, sourceCurrency),
     currency: crcCurrency(),
     doctorHonorarium: crcAmount(appointment.doctorHonorarium ?? service?.doctorHonorarium, sourceCurrency),
     status: appointment.status ?? "solicitada",
@@ -1615,17 +1652,101 @@ export function upsertPatient(input: PatientUpsertInput) {
   return normalized;
 }
 
+export function upsertService(input: ServiceCatalogUpsertInput) {
+  const state = getState();
+  const timestamp = new Date().toISOString();
+  const normalized = normalizeService({
+    ...input,
+    id: input.id ?? makeId("svc")
+  });
+  const index = state.serviceCatalog.findIndex((service) => service.id === normalized.id);
+  const previous = index >= 0 ? state.serviceCatalog[index] : undefined;
+
+  if (index >= 0) {
+    state.serviceCatalog[index] = normalized;
+  } else {
+    state.serviceCatalog.unshift(normalized);
+  }
+
+  const ivaAmount = calculateIvaAmount(normalized.price, normalized.ivaRate);
+  state.appointments.forEach((appointment) => {
+    const isEditableFutureAppointment =
+      appointment.serviceId === normalized.id &&
+      appointment.clinicId === normalized.clinicId &&
+      appointment.paymentStatus === "pendiente" &&
+      appointment.status !== "completada" &&
+      appointment.status !== "cancelada";
+    if (!isEditableFutureAppointment) return;
+
+    appointment.serviceName = normalized.name;
+    appointment.serviceSubtotal = normalized.price;
+    appointment.ivaRate = normalized.ivaRate;
+    appointment.ivaAmount = ivaAmount;
+    appointment.price = normalized.price + ivaAmount;
+    appointment.currency = normalized.currency;
+    appointment.doctorHonorarium = normalized.doctorHonorarium;
+    appointment.updatedAt = timestamp;
+  });
+
+  if (previous && previous.name !== normalized.name) {
+    state.patients.forEach((patient) => {
+      if (patient.clinicId === normalized.clinicId && patient.nextService === previous.name) {
+        patient.nextService = normalized.name;
+        patient.updatedAt = timestamp;
+      }
+    });
+  }
+
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId: normalized.clinicId,
+    type: index >= 0 ? "service.updated" : "service.created",
+    message: `${normalized.name} ${index >= 0 ? "actualizado" : "agregado"} en el catalogo de servicios.`,
+    at: timestamp
+  });
+
+  return normalized;
+}
+
+export function deleteService(clinicId: string, serviceId: string) {
+  const state = getState();
+  const service = state.serviceCatalog.find((item) => item.id === serviceId && item.clinicId === clinicId);
+  if (!service) return undefined;
+
+  state.serviceCatalog = state.serviceCatalog.filter((item) => item.id !== serviceId || item.clinicId !== clinicId);
+  state.staff.forEach((member) => {
+    if (member.clinicId === clinicId) {
+      member.serviceIds = member.serviceIds.filter((id) => id !== serviceId);
+    }
+  });
+  state.events.unshift({
+    id: makeId("evt"),
+    clinicId,
+    type: "service.deleted",
+    message: `${service.name} eliminado del catalogo. Las citas historicas conservaron sus importes.`,
+    at: new Date().toISOString()
+  });
+
+  return service;
+}
+
 export function upsertAppointment(input: AppointmentUpsertInput) {
   const state = getState();
   const timestamp = new Date().toISOString();
   const service = state.serviceCatalog.find((item) => item.id === input.serviceId);
   const patient = state.patients.find((item) => item.id === input.patientId);
+  const serviceSubtotal = input.serviceSubtotal ?? service?.price ?? input.price ?? 0;
+  const ivaRate = input.ivaRate ?? service?.ivaRate ?? 0;
+  const ivaAmount = input.ivaAmount ?? calculateIvaAmount(serviceSubtotal, ivaRate);
   const normalized = normalizeAppointment({
     ...input,
     id: input.id ?? makeId("appt"),
     patientName: patient?.name ?? input.patientName,
     serviceName: service?.name ?? input.serviceName,
-    price: input.price ?? service?.price ?? 0,
+    serviceSubtotal,
+    ivaRate,
+    ivaAmount,
+    price: input.price ?? serviceSubtotal + ivaAmount,
     currency: input.currency || service?.currency || "CRC",
     doctorHonorarium: input.doctorHonorarium ?? service?.doctorHonorarium ?? 0,
     endsAt: input.endsAt || addMinutes(input.startsAt, service?.durationMinutes ?? 30),
@@ -1853,7 +1974,11 @@ export function upsertCashTransaction(input: CashTransactionInput) {
   if (transaction.status === "completado" && transaction.appointmentId) {
     const appointment = state.appointments.find((item) => item.id === transaction.appointmentId && item.clinicId === transaction.clinicId);
     if (appointment) {
+      const serviceSubtotal =
+        appointment.ivaRate > 0 ? Math.round(transaction.amount / (1 + appointment.ivaRate / 100)) : transaction.amount;
       appointment.paymentStatus = "pagado";
+      appointment.serviceSubtotal = serviceSubtotal;
+      appointment.ivaAmount = transaction.amount - serviceSubtotal;
       appointment.price = transaction.amount;
       appointment.currency = "CRC";
       appointment.updatedAt = new Date().toISOString();
