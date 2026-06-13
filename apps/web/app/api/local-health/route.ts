@@ -35,18 +35,56 @@ export async function GET(request: Request) {
   }
 
   try {
+    const accessClientId = node.accessClientId?.trim() ?? "";
+    const accessClientSecret = node.accessClientSecret?.trim() ?? "";
+    const accessConfigured = Boolean(accessClientId && accessClientSecret);
     const response = await fetch(`${node.nodeUrl.replace(/\/$/, "")}/health`, {
       headers: getClinicNodeRequestHeaders(node),
       cache: "no-store",
       signal: AbortSignal.timeout(8000)
     });
-    const payload = await response.json().catch(() => null);
+    const contentType = response.headers.get("content-type") ?? "";
+    const rawBody = await response.text();
+    let payload: Record<string, unknown> | null = null;
+    if (contentType.includes("application/json") && rawBody) {
+      try {
+        payload = JSON.parse(rawBody) as Record<string, unknown>;
+      } catch {
+        payload = null;
+      }
+    }
+
+    if (!response.ok) {
+      const accessBlocked = response.status === 401 || response.status === 403;
+      return NextResponse.json({
+        ...(payload ?? {}),
+        ok: false,
+        clinicId: requestedClinicId,
+        nodeUrl: node.nodeUrl,
+        reachable: false,
+        upstreamStatus: response.status,
+        upstreamContentType: contentType || null,
+        cloudflareAccessConfigured: accessConfigured,
+        cloudflareClientIdLooksValid: accessClientId.endsWith(".access"),
+        cloudflareAccessAudience: response.headers.get("cf-access-aud"),
+        error: accessBlocked
+          ? `Cloudflare Access rechazo la solicitud con HTTP ${response.status}.`
+          : `El nodo respondio HTTP ${response.status}.`,
+        hint: accessBlocked
+          ? accessConfigured
+            ? "Vercel tiene credenciales configuradas, pero Cloudflare no acepta este Service Token. Revisa que la aplicacion Access incluya este token exacto en una politica con accion Service Auth."
+            : "Vercel no tiene disponibles ambas credenciales de Cloudflare Access en este deployment."
+          : getLocalNodeUrlHint(node.nodeUrl)
+      });
+    }
 
     return NextResponse.json({
       ...(payload ?? {}),
       ok: response.ok && Boolean(payload?.ok),
       nodeUrl: node.nodeUrl,
-      reachable: response.ok
+      reachable: response.ok,
+      cloudflareAccessConfigured: accessConfigured,
+      cloudflareClientIdLooksValid: accessClientId.endsWith(".access")
     });
   } catch (error) {
     return NextResponse.json({

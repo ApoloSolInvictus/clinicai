@@ -202,12 +202,16 @@ function getTemplateClinicConfig(clinicId: string): ClinicNodeConfig | null {
 }
 
 export function getClinicNodeRequestHeaders(node: Pick<ClinicNodeConfig, "token" | "accessClientId" | "accessClientSecret">) {
+  const token = node.token?.trim();
+  const accessClientId = node.accessClientId?.trim();
+  const accessClientSecret = node.accessClientSecret?.trim();
+
   return {
-    ...(node.token ? { authorization: `Bearer ${node.token}` } : {}),
-    ...(node.accessClientId && node.accessClientSecret
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(accessClientId && accessClientSecret
       ? {
-          "CF-Access-Client-Id": node.accessClientId,
-          "CF-Access-Client-Secret": node.accessClientSecret
+          "CF-Access-Client-Id": accessClientId,
+          "CF-Access-Client-Secret": accessClientSecret
         }
       : {})
   };

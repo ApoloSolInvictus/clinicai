@@ -17,6 +17,8 @@ export async function GET(request: Request) {
   }
 
   const node = getClinicNodeConfig(requestedClinicId);
+  const accessClientId = node?.accessClientId?.trim() ?? "";
+  const accessClientSecret = node?.accessClientSecret?.trim() ?? "";
 
   return NextResponse.json({
     clinicId: requestedClinicId,
@@ -27,7 +29,8 @@ export async function GET(request: Request) {
     hasPublicTemplate: Boolean(process.env.CLINIC_NODE_PUBLIC_URL_TEMPLATE?.trim()),
     hasUrlTemplate: Boolean(process.env.CLINIC_NODE_URL_TEMPLATE?.trim()),
     hasJsonConfig: Boolean(process.env.CLINIC_NODE_CONFIG_JSON?.trim()),
-    hasCloudflareAccess: Boolean(node?.accessClientId && node?.accessClientSecret),
+    hasCloudflareAccess: Boolean(accessClientId && accessClientSecret),
+    cloudflareClientIdLooksValid: accessClientId.endsWith(".access"),
     hint: node?.nodeUrl ? getLocalNodeUrlHint(node.nodeUrl) : "No hay nodo configurado para esta clinica."
   });
 }
