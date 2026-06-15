@@ -92,6 +92,43 @@ function compactModelRun(modelRun) {
   };
 }
 
+function getMessagingConfig(localDb) {
+  const messaging = asObject(localDb.messaging);
+
+  return {
+    demoMode: messaging.demoMode !== false,
+    demoEmail: typeof messaging.demoEmail === "string" && messaging.demoEmail.trim() ? messaging.demoEmail.trim() : "ronnywoods77@gmail.com",
+    demoWhatsapp:
+      typeof messaging.demoWhatsapp === "string" && messaging.demoWhatsapp.trim()
+        ? messaging.demoWhatsapp.trim()
+        : "+506-6121-5702",
+    requireHumanApproval: true,
+    providerMode: typeof messaging.providerMode === "string" && messaging.providerMode.trim() ? messaging.providerMode.trim() : "demo-only",
+    readInbox: false
+  };
+}
+
+function demoRecipientForChannel(messaging, channel) {
+  return channel === "whatsapp" ? messaging.demoWhatsapp : messaging.demoEmail;
+}
+
+function summarizeDraft(message) {
+  return {
+    id: message.id,
+    channel: message.channel,
+    to: message.to,
+    originalTo: message.originalTo,
+    demoTo: message.demoTo,
+    template: message.template,
+    subject: message.subject,
+    status: message.status,
+    humanApprovalRequired: message.humanApprovalRequired,
+    providerMode: message.providerMode,
+    patientName: message.patientName,
+    appointmentId: message.appointmentId
+  };
+}
+
 function asObject(value) {
   return value && typeof value === "object" ? value : {};
 }
@@ -176,11 +213,20 @@ function buildOperationalDb(task, localDb) {
 
 function buildModelPrompt(task, localDb, playbook) {
   const profile = intentProfiles[task.intent] ?? intentProfiles.sync;
+  const messaging = getMessagingConfig(localDb);
   const snapshot = {
     clinicId: task.clinicId,
     playbook,
     source: localDb.source ?? "local-node",
     centralContextAt: localDb.centralContextAt ?? null,
+    messaging: {
+      demoMode: messaging.demoMode,
+      demoEmail: messaging.demoEmail,
+      demoWhatsapp: messaging.demoWhatsapp,
+      requireHumanApproval: messaging.requireHumanApproval,
+      providerMode: messaging.providerMode,
+      readInbox: messaging.readInbox
+    },
     localCounts: {
       appointments: localDb.appointments.length,
       patients: localDb.patients.length,
@@ -248,6 +294,10 @@ function buildModelPrompt(task, localDb, playbook) {
     `Objetivo: ${profile.goal}.`,
     "Responde en espanol y devuelve JSON valido, sin Markdown.",
     "Nunca envies correos, WhatsApp, recetas o reportes medicos directamente; prepara borradores y marca aprobacion humana cuando aplique.",
+    "No leas ni revises bandejas de correo, inboxes, chats o conversaciones privadas.",
+    "Modo demo activo: cualquier borrador de Email debe ir solo a ronnywoods77@gmail.com y cualquier WhatsApp solo a +506-6121-5702.",
+    "Conserva el destinatario real del paciente solo como originalTo para auditoria; no lo uses como destino de envio en demo.",
+    "Todo mensaje requiere aprobacion humana antes de entregar a un proveedor de Email o WhatsApp.",
     "Usa colones costarricenses (CRC) para caja, facturas, gastos y honorarios.",
     "Usa el snapshot local recibido desde la Web App como fuente principal; si falta un dato, marca la accion como pendiente de revision humana.",
     "Incluye siempre: summary, actions, approvals, data, next_step.",
@@ -326,13 +376,38 @@ export async function getOpenClawStatus(config) {
 }
 
 function queueMessage(localDb, channel, draft) {
+  const messaging = getMessagingConfig(localDb);
   const queue = channel === "whatsapp" ? localDb.whatsappQueue : localDb.emailQueue;
+  const createdAt = nowIso();
+  const originalTo = draft.to ?? "";
+  const demoTo = demoRecipientForChannel(messaging, channel);
+  const routedTo = messaging.demoMode ? demoTo : originalTo;
   const message = {
     id: `${channel}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     channel,
+    createdAt,
+    ...draft,
+    to: routedTo,
+    originalTo,
+    demoTo: messaging.demoMode ? demoTo : null,
+    demoMode: messaging.demoMode,
     status: "ready_for_human_review",
-    createdAt: nowIso(),
-    ...draft
+    humanApprovalRequired: true,
+    providerMode: messaging.providerMode,
+    readInbox: false,
+    sent: false,
+    auditTrail: [
+      {
+        at: createdAt,
+        event: "draft_created",
+        channel,
+        originalTo,
+        routedTo,
+        note: messaging.demoMode
+          ? "Modo demo: destino redirigido al contacto de prueba y bloqueado hasta aprobacion humana."
+          : "Borrador bloqueado hasta aprobacion humana."
+      }
+    ]
   };
   queue.push(message);
   return message;
@@ -392,22 +467,21 @@ function runAgendaPlaybook(task, localDb, base) {
       playbook: detectPlaybook(task),
       appointmentsReviewed: localDb.appointments.length,
       conflicts,
-      remindersQueued: queued.length
+      remindersQueued: queued.length,
+      demoRouting: getMessagingConfig(localDb),
+      drafts: queued.map(summarizeDraft)
     },
-    next_step: "Revisar cola de mensajes y confirmar citas desde Agenda."
+    next_step: "Revisar la bandeja /outbox, aprobar manualmente los borradores y luego confirmar citas desde Agenda."
   };
 }
 
 function runMessagesPlaybook(task, localDb, base) {
-  const prepared = [
-    ...localDb.emailQueue.splice(0, localDb.emailQueue.length),
-    ...localDb.whatsappQueue.splice(0, localDb.whatsappQueue.length)
-  ];
+  let prepared = [...localDb.emailQueue, ...localDb.whatsappQueue];
 
   if (prepared.length === 0) {
     const target = localDb.appointments.find((item) => item.reminderStatus === "pendiente") ?? localDb.appointments[0];
     if (target) {
-      prepared.push(
+      prepared = [
         queueMessage(localDb, "email", {
           to: target.patientEmail,
           subject: "Recordatorio de cita",
@@ -421,7 +495,7 @@ function runMessagesPlaybook(task, localDb, base) {
           appointmentId: target.id,
           patientName: target.patientName
         })
-      );
+      ];
     }
   }
 
@@ -430,21 +504,17 @@ function runMessagesPlaybook(task, localDb, base) {
     summary: `${prepared.length} mensajes preparados para revision humana.`,
     actions: [
       "Validar datos de contacto del paciente",
-      "Crear borradores Email/WhatsApp",
-      "Dejar mensajes listos para proveedor autorizado"
+      "Crear borradores Email/WhatsApp redirigidos al contacto demo",
+      "No leer bandejas de correo ni conversaciones privadas",
+      "Dejar mensajes bloqueados hasta aprobacion humana"
     ],
-    approvals: ["Recepcion o medico debe aprobar mensajes clinicos antes de envio"],
+    approvals: ["Recepcion o medico debe aprobar cada mensaje antes de cualquier entrega a proveedor"],
     data: {
       playbook: detectPlaybook(task),
-      drafts: prepared.map((item) => ({
-        id: item.id,
-        channel: item.channel,
-        to: item.to,
-        template: item.template,
-        status: item.status
-      }))
+      demoRouting: getMessagingConfig(localDb),
+      drafts: prepared.map(summarizeDraft)
     },
-    next_step: "Aprobar mensajes y enviarlos con el proveedor de Email/WhatsApp configurado."
+    next_step: "Abrir /outbox, aprobar o rechazar cada borrador y despues entregar al proveedor autorizado si corresponde."
   };
 }
 

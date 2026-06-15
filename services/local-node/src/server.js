@@ -8,6 +8,14 @@ const clinic = {
   id: process.env.CLINIC_ID ?? "clinic-san-jose",
   name: process.env.CLINIC_NAME ?? "Clinica San Jose"
 };
+const demoMessaging = {
+  demoMode: true,
+  demoEmail: process.env.OPENCLINIC_DEMO_EMAIL?.trim() || "ronnywoods77@gmail.com",
+  demoWhatsapp: process.env.OPENCLINIC_DEMO_WHATSAPP?.trim() || "+506-6121-5702",
+  requireHumanApproval: true,
+  providerMode: process.env.OPENCLINIC_MESSAGE_PROVIDER?.trim() || "demo-only",
+  readInbox: false
+};
 const config = {
   mode: process.env.OPENCLAW_MODE ?? "mock",
   gatewayUrl: process.env.OPENCLAW_GATEWAY_URL ?? "http://host.docker.internal:18789",
@@ -136,6 +144,7 @@ const localDb = {
     expensesMonth: 22000,
     currency: "CRC"
   },
+  messaging: demoMessaging,
   emailQueue: [],
   whatsappQueue: [],
   events: [
@@ -175,6 +184,45 @@ function pushEvent(type, message, extra = {}) {
   return event;
 }
 
+function outboxMessages() {
+  return [...localDb.emailQueue, ...localDb.whatsappQueue].sort((left, right) =>
+    String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? ""))
+  );
+}
+
+function outboxTotals() {
+  const messages = outboxMessages();
+  return {
+    total: messages.length,
+    email: localDb.emailQueue.length,
+    whatsapp: localDb.whatsappQueue.length,
+    pendingApproval: messages.filter((message) => message.status === "ready_for_human_review").length,
+    approved: messages.filter((message) => String(message.status).startsWith("approved")).length,
+    rejected: messages.filter((message) => message.status === "rejected_by_human").length
+  };
+}
+
+function findOutboxMessage(messageId) {
+  for (const queue of [localDb.emailQueue, localDb.whatsappQueue]) {
+    const message = queue.find((item) => item.id === messageId);
+    if (message) return message;
+  }
+
+  return null;
+}
+
+function addMessageAudit(message, event, extra = {}) {
+  const auditTrail = Array.isArray(message.auditTrail) ? message.auditTrail : [];
+  message.auditTrail = [
+    ...auditTrail,
+    {
+      at: new Date().toISOString(),
+      event,
+      ...extra
+    }
+  ];
+}
+
 app.get("/health", config.healthRequiresToken ? requireToken : (_request, _response, next) => next(), async (_request, response) => {
   const openclaw = await getOpenClawStatus(config);
   response.json({
@@ -192,6 +240,8 @@ app.get("/health", config.healthRequiresToken ? requireToken : (_request, _respo
       reportsForApproval: localDb.reports.filter((item) => item.status === "pendiente-aprobacion").length,
       queuedEmails: localDb.emailQueue.length,
       queuedWhatsApps: localDb.whatsappQueue.length,
+      messagesPendingApproval: outboxTotals().pendingApproval,
+      messagingDemoMode: localDb.messaging.demoMode,
       events: localDb.events.length
     }
   });
@@ -220,7 +270,83 @@ app.post("/tasks", requireToken, async (request, response) => {
     sync: {
       pendingEvents: localDb.events.length,
       nextAction: "POST /sync/now"
-    }
+    },
+    outbox: outboxTotals()
+  });
+});
+
+app.get("/outbox", requireToken, (_request, response) => {
+  response.json({
+    clinicId: clinic.id,
+    messaging: localDb.messaging,
+    totals: outboxTotals(),
+    messages: outboxMessages()
+  });
+});
+
+app.post("/outbox/:messageId/approve", requireToken, (request, response) => {
+  const message = findOutboxMessage(request.params.messageId);
+
+  if (!message) {
+    return response.status(404).json({ error: "Mensaje no encontrado en bandeja de salida." });
+  }
+
+  if (message.status !== "ready_for_human_review") {
+    return response.status(409).json({
+      error: "El mensaje no esta pendiente de aprobacion humana.",
+      status: message.status,
+      message
+    });
+  }
+
+  const now = new Date().toISOString();
+  message.status = "approved_for_demo_delivery";
+  message.approvedAt = now;
+  message.approvedBy = request.body?.approvedBy ?? "human-review";
+  message.providerStatus = localDb.messaging.providerMode === "demo-only" ? "not_sent_demo_only" : "approved_pending_provider";
+  message.sent = false;
+  addMessageAudit(message, "human_approved", {
+    approvedBy: message.approvedBy,
+    providerStatus: message.providerStatus
+  });
+  pushEvent("outbox.message.approved", `Mensaje ${message.id} aprobado para demostracion.`, {
+    messageId: message.id,
+    channel: message.channel
+  });
+
+  return response.json({
+    ok: true,
+    sent: false,
+    note: "Aprobado para demo. No se envio automaticamente; queda listo para el proveedor autorizado.",
+    message
+  });
+});
+
+app.post("/outbox/:messageId/reject", requireToken, (request, response) => {
+  const message = findOutboxMessage(request.params.messageId);
+
+  if (!message) {
+    return response.status(404).json({ error: "Mensaje no encontrado en bandeja de salida." });
+  }
+
+  message.status = "rejected_by_human";
+  message.rejectedAt = new Date().toISOString();
+  message.rejectedBy = request.body?.rejectedBy ?? "human-review";
+  message.rejectionReason = request.body?.reason ?? "No aprobado para envio.";
+  message.sent = false;
+  addMessageAudit(message, "human_rejected", {
+    rejectedBy: message.rejectedBy,
+    reason: message.rejectionReason
+  });
+  pushEvent("outbox.message.rejected", `Mensaje ${message.id} rechazado por revision humana.`, {
+    messageId: message.id,
+    channel: message.channel
+  });
+
+  return response.json({
+    ok: true,
+    sent: false,
+    message
   });
 });
 
