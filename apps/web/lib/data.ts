@@ -1501,6 +1501,41 @@ function ensureStateShape(state: RecoverableCentralState): CentralState {
   return state as CentralState;
 }
 
+function compactTaskResult(result: unknown): unknown {
+  if (!isRecord(result)) return result;
+
+  const nestedResult = isRecord(result.result) ? result.result : {};
+  return {
+    ok: result.ok,
+    warning: result.warning,
+    error: result.error,
+    note: result.note,
+    reason: result.reason,
+    hint: result.hint,
+    nextAction: result.nextAction,
+    timeoutMs: result.timeoutMs,
+    queuedCentral: result.queuedCentral,
+    forwarded: result.forwarded,
+    nodeUrl: result.nodeUrl,
+    upstreamStatus: result.upstreamStatus,
+    upstreamContentType: result.upstreamContentType,
+    summary: typeof result.summary === "string" ? result.summary : nestedResult.summary,
+    playbook: result.playbook ?? nestedResult.playbook,
+    dataSource: result.dataSource ?? nestedResult.dataSource,
+    modelRunError: result.modelRunError ?? nestedResult.modelRunError,
+    outbox: result.outbox
+  };
+}
+
+function trimStateForPersistence(state: CentralState) {
+  state.tasks = state.tasks.slice(0, 60).map((task) => ({
+    ...task,
+    result: compactTaskResult(task.result)
+  }));
+  state.events = state.events.slice(0, 180);
+  return state;
+}
+
 export function getState() {
   if (!globalThis.luxAeternaState) {
     globalThis.luxAeternaState = structuredClone(initialState);
@@ -1534,7 +1569,7 @@ export async function hydrateState() {
         return getState();
       }
 
-      const state = getState();
+      const state = trimStateForPersistence(getState());
       await ref.set({
         version: persistentStateVersion,
         updatedAt: new Date().toISOString(),
@@ -1563,7 +1598,7 @@ export async function persistState() {
     await hydrateState();
   }
 
-  const state = getState();
+  const state = trimStateForPersistence(getState());
   const ref = await getPersistentStateRef();
   await ref.set({
     version: persistentStateVersion,

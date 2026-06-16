@@ -34,6 +34,28 @@ function getLocalNodeTaskTimeoutMs() {
 
 const localNodeTaskTimeoutMs = getLocalNodeTaskTimeoutMs();
 
+function envIsTrue(value: string | undefined) {
+  return value === "true" || value === "1";
+}
+
+function envIsFalse(value: string | undefined) {
+  return value === "false" || value === "0";
+}
+
+function shouldForwardTasksToLocalNode() {
+  const configured = process.env.LOCAL_NODE_TASK_FORWARDING_ENABLED;
+  if (envIsTrue(configured)) return true;
+  if (envIsFalse(configured)) return false;
+
+  return !isCloudRuntime();
+}
+
+function persistStateInBackground() {
+  void persistState().catch((error) => {
+    console.error("[openclinic] No se pudo persistir la tarea en segundo plano.", error);
+  });
+}
+
 function truncateText(value: string | null | undefined, maxLength = 600) {
   const text = value ?? "";
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
@@ -341,16 +363,45 @@ export async function POST(request: Request) {
   await hydrateState();
   const task = createTask(parsed.data);
   const node = getClinicNodeConfig(task.clinicId);
-  const context = buildLocalExecutionContext(task.clinicId);
-  await persistState();
 
   if (!node?.nodeUrl) {
+    persistStateInBackground();
     return NextResponse.json({
       task,
       forwarded: false,
       note: "La clinica no tiene nodo local configurado; la tarea queda en cola central."
     });
   }
+
+  if (!shouldForwardTasksToLocalNode()) {
+    const result = {
+      ok: true,
+      queuedCentral: true,
+      forwarded: false,
+      nodeUrl: node.nodeUrl,
+      reason: "El reenvio sincronico al nodo local esta desactivado en produccion para evitar 502 de Cloudflare.",
+      nextAction: "Revisar el nodo local o activar LOCAL_NODE_TASK_FORWARDING_ENABLED=true cuando el tunel este estable.",
+      summary: "Tarea guardada en cola central; no se envio nada por Email ni WhatsApp."
+    };
+    const updatedTask = patchTask(task.id, { status: "sent-local", result }) ?? task;
+    patchClinic(task.clinicId, { status: "degraded" });
+    addEvent({
+      clinicId: task.clinicId,
+      type: "local.forward.deferred",
+      message: "Tarea guardada en cola central; reenvio sincronico desactivado para proteger la Web App."
+    });
+    persistStateInBackground();
+
+    return NextResponse.json({
+      task: updatedTask,
+      forwarded: false,
+      result,
+      note: result.summary
+    });
+  }
+
+  const context = buildLocalExecutionContext(task.clinicId);
+  await persistState();
 
   if (isCloudRuntime() && isLocalNodeUrl(node.nodeUrl)) {
     const message = "La API central no puede alcanzar una URL local .node desde Vercel.";
