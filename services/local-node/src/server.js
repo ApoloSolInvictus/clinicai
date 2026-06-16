@@ -23,6 +23,10 @@ const config = {
   runnerUrl: process.env.OPENCLAW_RUNNER_URL ?? "",
   runnerTimeoutMs: Number(process.env.OPENCLAW_RUNNER_TIMEOUT_MS ?? 8_000),
   token: process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token",
+  centralQueueUrl: process.env.OPENCLINIC_CENTRAL_QUEUE_URL ?? "",
+  centralQueueToken: process.env.OPENCLINIC_CENTRAL_QUEUE_TOKEN ?? process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token",
+  centralQueuePollMs: Number(process.env.OPENCLINIC_QUEUE_POLL_MS ?? 0),
+  centralQueuePullLimit: Number(process.env.OPENCLINIC_QUEUE_PULL_LIMIT ?? 3),
   healthRequiresToken: process.env.NODE_HEALTH_REQUIRES_TOKEN === "true" || process.env.OPENCLINIC_SECURE_HEALTH === "true"
 };
 
@@ -244,6 +248,89 @@ function addMessageAudit(message, event, extra = {}) {
   ];
 }
 
+async function callCentralQueue(payload) {
+  if (!config.centralQueueUrl) {
+    throw new Error("OPENCLINIC_CENTRAL_QUEUE_URL no esta configurado en el nodo local.");
+  }
+
+  const response = await fetch(config.centralQueueUrl, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.centralQueueToken}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(30_000)
+  });
+  const rawBody = await response.text();
+  const result = rawBody ? JSON.parse(rawBody) : {};
+
+  if (!response.ok) {
+    throw new Error(result?.error ?? `Central queue HTTP ${response.status}`);
+  }
+
+  return result;
+}
+
+async function completeCentralTask(task, ok, result) {
+  return callCentralQueue({
+    action: "complete",
+    clinicId: clinic.id,
+    taskId: task.id,
+    ok,
+    result
+  });
+}
+
+async function pullCentralQueueOnce() {
+  const pulled = await callCentralQueue({
+    action: "pull",
+    clinicId: clinic.id,
+    limit: config.centralQueuePullLimit
+  });
+  const tasks = Array.isArray(pulled.tasks) ? pulled.tasks : [];
+  const summary = {
+    ok: true,
+    clinicId: clinic.id,
+    pulled: tasks.length,
+    completed: 0,
+    failed: 0,
+    outbox: outboxTotals(),
+    results: []
+  };
+
+  for (const task of tasks) {
+    try {
+      const result = await runAutomation(task, localDb, config);
+      const envelope = {
+        accepted: true,
+        clinicId: clinic.id,
+        taskId: task.id,
+        summary: result.summary,
+        playbook: result.playbook,
+        dataSource: result.dataSource,
+        openclawStatus: result.openclaw?.status,
+        modelRunError: result.modelRunError,
+        result,
+        outbox: outboxTotals()
+      };
+      await completeCentralTask(task, true, envelope);
+      summary.completed += 1;
+      summary.results.push({ taskId: task.id, ok: true, summary: result.summary });
+      pushEvent("central.queue.completed", result.summary, { taskId: task.id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo ejecutar tarea de cola central.";
+      await completeCentralTask(task, false, { error: message, taskId: task.id });
+      summary.failed += 1;
+      summary.results.push({ taskId: task.id, ok: false, error: message });
+      pushEvent("central.queue.failed", message, { taskId: task.id });
+    }
+  }
+
+  summary.outbox = outboxTotals();
+  return summary;
+}
+
 app.get("/health", config.healthRequiresToken ? requireToken : (_request, _response, next) => next(), async (_request, response) => {
   const openclaw = await getOpenClawStatus(config);
   response.json({
@@ -263,6 +350,8 @@ app.get("/health", config.healthRequiresToken ? requireToken : (_request, _respo
       queuedWhatsApps: localDb.whatsappQueue.length,
       messagesPendingApproval: outboxTotals().pendingApproval,
       messagingDemoMode: localDb.messaging.demoMode,
+      centralQueueConfigured: Boolean(config.centralQueueUrl),
+      centralQueuePollMs: config.centralQueuePollMs,
       events: localDb.events.length
     }
   });
@@ -294,6 +383,18 @@ app.post("/tasks", requireToken, async (request, response) => {
     },
     outbox: outboxTotals()
   });
+});
+
+app.post("/queue/pull", requireToken, async (_request, response) => {
+  try {
+    const result = await pullCentralQueueOnce();
+    return response.json(result);
+  } catch (error) {
+    return response.status(400).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "No se pudo consultar la cola central."
+    });
+  }
 });
 
 app.get("/outbox", requireToken, (_request, response) => {
@@ -394,6 +495,34 @@ app.get("/events", requireToken, (_request, response) => {
   response.json({ clinicId: clinic.id, events: localDb.events });
 });
 
+let centralQueuePolling = false;
+
+async function pollCentralQueueSafely() {
+  if (centralQueuePolling || !config.centralQueueUrl) return;
+
+  centralQueuePolling = true;
+  try {
+    const result = await pullCentralQueueOnce();
+    if (result.pulled > 0) {
+      pushEvent(
+        "central.queue.polled",
+        `Cola central procesada: ${result.completed} completadas, ${result.failed} fallidas.`,
+        { pulled: result.pulled }
+      );
+    }
+  } catch (error) {
+    pushEvent("central.queue.poll_failed", error instanceof Error ? error.message : "No se pudo consultar la cola central.");
+  } finally {
+    centralQueuePolling = false;
+  }
+}
+
 app.listen(port, () => {
   console.log(`Lux Aeterna local node listening on http://localhost:${port}`);
+  if (config.centralQueueUrl && config.centralQueuePollMs >= 5_000) {
+    const timer = setInterval(pollCentralQueueSafely, config.centralQueuePollMs);
+    timer.unref?.();
+    setTimeout(pollCentralQueueSafely, 1_000).unref?.();
+    console.log(`Central queue polling enabled every ${config.centralQueuePollMs}ms`);
+  }
 });

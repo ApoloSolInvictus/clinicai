@@ -390,7 +390,7 @@ export async function POST(request: Request) {
       type: "local.forward.deferred",
       message: "Tarea guardada en cola central; reenvio sincronico desactivado para proteger la Web App."
     });
-    persistStateInBackground();
+    await persistState();
 
     return NextResponse.json({
       task: updatedTask,
