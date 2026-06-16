@@ -991,7 +991,14 @@ export default function Home() {
         headers: { "content-type": "application/json", ...(await session.getAuthHeaders()) },
         body: JSON.stringify(input)
       });
-      const payload = await response.json();
+      const rawResponse = await response.text();
+      let payload: Record<string, any> = {};
+      try {
+        payload = rawResponse ? JSON.parse(rawResponse) : {};
+      } catch {
+        const preview = rawResponse.replace(/\s+/g, " ").trim().slice(0, 500);
+        throw new Error(`La API central devolvio una respuesta no JSON al ejecutar OpenClaw. ${preview}`);
+      }
       if (!response.ok) {
         throw new Error(payload?.error ?? payload?.result?.error ?? `OpenClaw respondio HTTP ${response.status}`);
       }

@@ -158,7 +158,28 @@ const localDb = {
 };
 
 app.use(cors());
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: process.env.LOCAL_NODE_JSON_LIMIT ?? "5mb" }));
+
+app.use((error, _request, response, next) => {
+  if (!error) return next();
+
+  const type = error.type ?? "";
+  const isPayloadTooLarge = type === "entity.too.large";
+  const isJsonSyntaxError = error instanceof SyntaxError && "body" in error;
+
+  if (isPayloadTooLarge || isJsonSyntaxError) {
+    return response.status(isPayloadTooLarge ? 413 : 400).json({
+      ok: false,
+      error: isPayloadTooLarge
+        ? "El payload enviado al nodo local excede el limite permitido."
+        : "El nodo local recibio JSON invalido.",
+      code: isPayloadTooLarge ? "LOCAL_NODE_PAYLOAD_TOO_LARGE" : "LOCAL_NODE_INVALID_JSON",
+      limit: process.env.LOCAL_NODE_JSON_LIMIT ?? "5mb"
+    });
+  }
+
+  return next(error);
+});
 
 function requireToken(request, response, next) {
   const expected = config.token;
