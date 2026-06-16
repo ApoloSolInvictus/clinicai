@@ -125,8 +125,29 @@ function summarizeDraft(message) {
     humanApprovalRequired: message.humanApprovalRequired,
     providerMode: message.providerMode,
     patientName: message.patientName,
-    appointmentId: message.appointmentId
+    appointmentId: message.appointmentId,
+    reportId: message.reportId,
+    reportTitle: message.reportTitle
   };
+}
+
+function findPatientForReport(report, patients) {
+  return (
+    patients.find((patient) => report.patientId && patient.id === report.patientId) ??
+    patients.find((patient) => patient.name === report.patientName) ??
+    null
+  );
+}
+
+function messageAlreadyQueued(localDb, channel, template, entityId) {
+  const queue = channel === "whatsapp" ? localDb.whatsappQueue : localDb.emailQueue;
+  return queue.some(
+    (message) =>
+      message.channel === channel &&
+      message.template === template &&
+      (message.reportId === entityId || message.appointmentId === entityId) &&
+      message.status !== "rejected_by_human"
+  );
 }
 
 function asObject(value) {
@@ -577,6 +598,7 @@ function runAccountingPlaybook(task, localDb, base) {
 
 function runClinicalPlaybook(task, localDb, base) {
   const pendingReports = localDb.reports.filter((report) => report.status === "pendiente-aprobacion");
+  const approvedReports = localDb.reports.filter((report) => report.status === "aprobado");
   const packages = pendingReports.map((report) => ({
     reportId: report.id,
     patientName: report.patientName,
@@ -586,19 +608,74 @@ function runClinicalPlaybook(task, localDb, base) {
     documents: report.medicalImages,
     requiresHumanApproval: true
   }));
+  const missingContacts = [];
+  const deliveryDrafts = approvedReports.flatMap((report) => {
+    const patient = findPatientForReport(report, localDb.patients);
+    const channels = Array.isArray(report.deliveryChannels) && report.deliveryChannels.length > 0 ? report.deliveryChannels : ["email"];
+
+    return channels.flatMap((channel) => {
+      const contact = channel === "whatsapp" ? patient?.whatsapp : patient?.email;
+      if (!contact) {
+        missingContacts.push({
+          reportId: report.id,
+          patientName: report.patientName,
+          channel,
+          reason: "Paciente sin contacto registrado para este canal"
+        });
+        return [];
+      }
+
+      if (messageAlreadyQueued(localDb, channel, "approved-medical-report-delivery", report.id)) {
+        return [];
+      }
+
+      return [
+        queueMessage(localDb, channel, {
+          to: contact,
+          subject: "Reporte medico aprobado",
+          template: "approved-medical-report-delivery",
+          reportId: report.id,
+          reportTitle: report.title,
+          patientId: patient?.id ?? report.patientId,
+          patientName: report.patientName,
+          doctorName: report.doctorName,
+          approvedAt: report.approvedAt,
+          signedByDoctor: report.signedByDoctor,
+          summary: report.summary,
+          prescription: report.prescription,
+          nextAppointment: report.nextAppointment,
+          medicalImages: report.medicalImages
+        })
+      ];
+    });
+  });
+  const deliveryApprovals =
+    deliveryDrafts.length > 0
+      ? [`${deliveryDrafts.length} borradores de entrega requieren aprobacion humana en /outbox antes de envio externo`]
+      : [];
 
   return {
     ...base,
-    summary: `${packages.length} reportes/recetas preparados para firma medica.`,
+    summary:
+      deliveryDrafts.length > 0
+        ? `${deliveryDrafts.length} borradores de reporte aprobado preparados para entrega auditada y ${packages.length} reportes pendientes de firma.`
+        : `${packages.length} reportes/recetas preparados para firma medica.`,
     actions: [
       "Leer reporte clinico y recetario",
       "Preparar paquete con imagenes medicas y proxima cita",
-      "Bloquear envio hasta aprobacion/firma humana del medico"
+      "Crear borradores de entrega al contacto del paciente cuando el reporte ya esta aprobado",
+      "Bloquear envio externo hasta aprobacion humana en la bandeja de salida"
     ],
-    approvals: packages.map((item) => `Firma requerida: ${item.doctorName} para ${item.patientName}`),
+    approvals: [
+      ...packages.map((item) => `Firma requerida: ${item.doctorName} para ${item.patientName}`),
+      ...deliveryApprovals
+    ],
     data: {
       playbook: detectPlaybook(task),
       packages,
+      deliveryDrafts: deliveryDrafts.map(summarizeDraft),
+      missingContacts,
+      demoRouting: getMessagingConfig(localDb),
       recordsIndexed: localDb.patients.length
     },
     next_step: "Medico aprueba desde pestaña Medicos; luego OpenClaw prepara envio auditado."

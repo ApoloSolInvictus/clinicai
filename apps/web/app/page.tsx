@@ -1290,6 +1290,7 @@ export default function Home() {
       prompt:
         `Reporte aprobado humanamente por ${input.doctor.name}. ` +
         `Paciente: ${input.patient.name} (${input.patient.documentId}). ` +
+        `Correo paciente: ${input.patient.email || "sin correo"}. WhatsApp paciente: ${input.patient.whatsapp || "sin whatsapp"}. ` +
         `Reporte: ${input.report.title}. Tipo: ${reportTypeLabels[input.report.type]}. ` +
         `Firma: ${input.doctor.signatureLabel || input.doctor.name}. ` +
         `Canales autorizados: ${input.deliveryChannels.join(", ")}. ` +

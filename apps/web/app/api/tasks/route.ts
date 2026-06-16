@@ -24,7 +24,15 @@ const taskSchema = z.object({
   prompt: z.string().min(8).max(2000)
 });
 
-export const maxDuration = 300;
+export const maxDuration = 60;
+
+function getLocalNodeTaskTimeoutMs() {
+  const configured = Number(process.env.LOCAL_NODE_TASK_TIMEOUT_MS ?? 25_000);
+  if (!Number.isFinite(configured) || configured <= 0) return 25_000;
+  return Math.min(configured, 85_000);
+}
+
+const localNodeTaskTimeoutMs = getLocalNodeTaskTimeoutMs();
 
 function truncateText(value: string | null | undefined, maxLength = 600) {
   const text = value ?? "";
@@ -377,7 +385,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({ ...task, context }),
       cache: "no-store",
-      signal: AbortSignal.timeout(295_000)
+      signal: AbortSignal.timeout(localNodeTaskTimeoutMs)
     });
     const parsedResponse = await readNodeResponse(response);
     const result =
@@ -421,19 +429,35 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo conectar con el nodo local.";
-    const updatedTask = patchTask(task.id, { status: "sent-local", result: { warning: message } }) ?? task;
+    const timedOut =
+      error instanceof Error &&
+      (error.name === "TimeoutError" || error.name === "AbortError" || /timeout|abort/i.test(error.message));
+    const result = {
+      warning: timedOut
+        ? `El nodo local no respondio antes de ${Math.round(localNodeTaskTimeoutMs / 1000)} segundos.`
+        : message,
+      nodeUrl: node.nodeUrl,
+      timeoutMs: localNodeTaskTimeoutMs,
+      queuedCentral: true,
+      hint: timedOut
+        ? "La tarea queda en cola central para evitar que Cloudflare devuelva 502 HTML. Revisa que el tunel y el nodo local respondan rapido a POST /tasks."
+        : getLocalNodeUrlHint(node.nodeUrl)
+    };
+    const updatedTask = patchTask(task.id, { status: "sent-local", result }) ?? task;
     patchClinic(task.clinicId, { status: "degraded" });
     addEvent({
       clinicId: task.clinicId,
       type: "local.forward.pending",
-      message: "La tarea quedo pendiente; el nodo local no estuvo disponible en este host."
+      message: timedOut
+        ? "La tarea quedo pendiente; el nodo local tardo demasiado en responder."
+        : "La tarea quedo pendiente; el nodo local no estuvo disponible en este host."
     });
     await persistState();
 
     return NextResponse.json({
       task: updatedTask,
       forwarded: false,
-      warning: message
+      ...result
     });
   }
 }
