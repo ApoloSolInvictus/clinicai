@@ -4,6 +4,22 @@ import { canAccessClinic, firstAccessibleClinicId, requireAuthenticatedUser } fr
 
 export const maxDuration = 10;
 
+function envIsTrue(value: string | undefined) {
+  return value === "true" || value === "1";
+}
+
+function envIsFalse(value: string | undefined) {
+  return value === "false" || value === "0";
+}
+
+function shouldUseCentralQueueMode() {
+  const configured = process.env.LOCAL_NODE_TASK_FORWARDING_ENABLED;
+  if (envIsTrue(configured)) return false;
+  if (envIsFalse(configured)) return true;
+
+  return isCloudRuntime();
+}
+
 export async function GET(request: Request) {
   const auth = await requireAuthenticatedUser(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -38,6 +54,7 @@ export async function GET(request: Request) {
     const accessClientId = node.accessClientId?.trim() ?? "";
     const accessClientSecret = node.accessClientSecret?.trim() ?? "";
     const accessConfigured = Boolean(accessClientId && accessClientSecret);
+    const centralQueueMode = shouldUseCentralQueueMode();
     const response = await fetch(`${node.nodeUrl.replace(/\/$/, "")}/health`, {
       headers: getClinicNodeRequestHeaders(node),
       cache: "no-store",
@@ -59,7 +76,11 @@ export async function GET(request: Request) {
       return NextResponse.json({
         ...(payload ?? {}),
         ok: false,
+        operational: centralQueueMode,
+        queueMode: centralQueueMode,
+        queueStatus: centralQueueMode ? "central-pull-ready" : undefined,
         clinicId: requestedClinicId,
+        clinic: { id: requestedClinicId, name: node.name },
         nodeUrl: node.nodeUrl,
         reachable: false,
         upstreamStatus: response.status,
@@ -70,6 +91,9 @@ export async function GET(request: Request) {
         error: accessBlocked
           ? `Cloudflare Access rechazo la solicitud con HTTP ${response.status}.`
           : `El nodo respondio HTTP ${response.status}.`,
+        warning: centralQueueMode
+          ? "El ping directo al nodo fue bloqueado, pero OpenClaw esta configurado para trabajar por cola central pull."
+          : undefined,
         hint: accessBlocked
           ? accessConfigured
             ? "Vercel tiene credenciales configuradas, pero Cloudflare no acepta este Service Token. Revisa que la aplicacion Access incluya este token exacto en una politica con accion Service Auth."
@@ -87,11 +111,19 @@ export async function GET(request: Request) {
       cloudflareClientIdLooksValid: accessClientId.endsWith(".access")
     });
   } catch (error) {
+    const centralQueueMode = shouldUseCentralQueueMode();
     return NextResponse.json({
       ok: false,
+      operational: centralQueueMode,
+      queueMode: centralQueueMode,
+      queueStatus: centralQueueMode ? "central-pull-ready" : undefined,
       clinicId: requestedClinicId,
+      clinic: { id: requestedClinicId, name: node.name },
       nodeUrl: node.nodeUrl,
       reachable: false,
+      warning: centralQueueMode
+        ? "No se pudo hacer ping directo al nodo, pero OpenClaw esta configurado para trabajar por cola central pull."
+        : undefined,
       error: error instanceof Error ? error.message : "No se pudo consultar el nodo local.",
       hint: getLocalNodeUrlHint(node.nodeUrl)
     });

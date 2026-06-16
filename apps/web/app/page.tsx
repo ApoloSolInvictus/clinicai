@@ -66,12 +66,16 @@ import { useFirebaseSession } from "@/lib/use-firebase-session";
 
 type HealthState = {
   ok?: boolean;
+  operational?: boolean;
+  queueMode?: boolean;
+  queueStatus?: string;
   service?: string;
   clinic?: { id: string; name: string };
   nodeUrl?: string;
   openclaw?: { mode: string; gatewayUrl: string; reachable: boolean; status?: string };
   capabilities?: string[];
   note?: string;
+  warning?: string;
   error?: string;
 };
 
@@ -923,6 +927,13 @@ export default function Home() {
   const clinicReports = state?.reports.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicAutomations = state?.automations.filter((item) => item.clinicId === clinicId) ?? [];
   const clinicEvents = state?.events.filter((item) => item.clinicId === clinicId).slice(0, 6) ?? [];
+  const localNodeOnline = health?.ok === true;
+  const centralQueueReady = !localNodeOnline && (health?.queueMode === true || health?.operational === true);
+  const nodeStatusLabel = localNodeOnline
+    ? "Nodo local conectado"
+    : centralQueueReady
+      ? "Cola central preparada"
+      : "Nodo local por conectar";
 
   async function loadState() {
     const response = await fetch("/api/state", {
@@ -1714,8 +1725,8 @@ export default function Home() {
               ))}
             </select>
             <span className="status-pill">
-              <span className={`status-dot ${health?.ok ? "online" : ""}`} />
-              {health?.ok ? "Nodo local conectado" : "Nodo local por conectar"}
+              <span className={`status-dot ${localNodeOnline || centralQueueReady ? "online" : ""}`} />
+              {nodeStatusLabel}
             </span>
             <button className="btn" onClick={() => pingLocalNode()} title="Consultar salud del nodo local">
               <HeartPulse size={18} />
@@ -5596,6 +5607,21 @@ function NodePanel({ health, result }: { health: HealthState | null; result: str
           <div className="sync-line">
             Gateway <strong>{health?.openclaw?.reachable ? "Disponible" : "Mock/local"}</strong>
           </div>
+          <div className="sync-line">
+            Estado{" "}
+            <strong>
+              {health?.ok
+                ? "Nodo conectado"
+                : health?.queueMode || health?.operational
+                  ? "Cola central preparada"
+                  : "Pendiente"}
+            </strong>
+          </div>
+          {health?.warning ? (
+            <div className="sync-line">
+              Aviso <strong>{health.warning}</strong>
+            </div>
+          ) : null}
         </div>
         <pre className="result-box">{result}</pre>
       </div>
