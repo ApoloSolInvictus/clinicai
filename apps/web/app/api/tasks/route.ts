@@ -27,8 +27,8 @@ const taskSchema = z.object({
 export const maxDuration = 60;
 
 function getLocalNodeTaskTimeoutMs() {
-  const configured = Number(process.env.LOCAL_NODE_TASK_TIMEOUT_MS ?? 25_000);
-  if (!Number.isFinite(configured) || configured <= 0) return 25_000;
+  const configured = Number(process.env.LOCAL_NODE_TASK_TIMEOUT_MS ?? 12_000);
+  if (!Number.isFinite(configured) || configured <= 0) return 12_000;
   return Math.min(configured, 85_000);
 }
 

@@ -21,7 +21,7 @@ const config = {
   gatewayUrl: process.env.OPENCLAW_GATEWAY_URL ?? "http://host.docker.internal:18789",
   gatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN ?? "",
   runnerUrl: process.env.OPENCLAW_RUNNER_URL ?? "",
-  runnerTimeoutMs: Number(process.env.OPENCLAW_RUNNER_TIMEOUT_MS ?? 30_000),
+  runnerTimeoutMs: Number(process.env.OPENCLAW_RUNNER_TIMEOUT_MS ?? 8_000),
   token: process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token",
   healthRequiresToken: process.env.NODE_HEALTH_REQUIRES_TOKEN === "true" || process.env.OPENCLINIC_SECURE_HEALTH === "true"
 };

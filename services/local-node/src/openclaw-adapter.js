@@ -745,9 +745,10 @@ export async function runAutomation(task, localDb, config) {
   let modelRun = null;
   let modelRunError = null;
   const shouldRunGateway = config.mode === "gateway" && openclaw.reachable && config.gatewayToken;
+  const shouldRunRunner = Boolean(config.runnerUrl && openclaw.runner?.reachable);
   const modelPrompt = buildModelPrompt(task, operationalDb, playbook);
 
-  if (config.runnerUrl) {
+  if (shouldRunRunner) {
     try {
       const response = await fetch(config.runnerUrl, {
         method: "POST",
@@ -769,6 +770,8 @@ export async function runAutomation(task, localDb, config) {
     } catch (error) {
       modelRunError = error instanceof Error ? error.message : "OpenClaw runner failed";
     }
+  } else if (config.runnerUrl) {
+    modelRunError = "OpenClaw runner no disponible; se uso playbook deterministico local.";
   }
 
   if (!modelRun && shouldRunGateway) {
