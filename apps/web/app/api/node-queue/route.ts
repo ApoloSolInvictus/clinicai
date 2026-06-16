@@ -139,6 +139,22 @@ function bearerToken(request: Request) {
 
 function isAuthorizedNode(request: Request, clinicId: string) {
   const token = bearerToken(request);
+  const accessClientId = request.headers.get("cf-access-client-id")?.trim();
+  const accessClientSecret = request.headers.get("cf-access-client-secret")?.trim();
+  const expectedAccessClientId = process.env.CLOUDFLARE_ACCESS_CLIENT_ID?.trim();
+  const expectedAccessClientSecret = process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET?.trim();
+
+  if (
+    accessClientId &&
+    accessClientSecret &&
+    expectedAccessClientId &&
+    expectedAccessClientSecret &&
+    accessClientId === expectedAccessClientId &&
+    accessClientSecret === expectedAccessClientSecret
+  ) {
+    return true;
+  }
+
   if (!token) return false;
 
   const node = getClinicNodeConfig(clinicId);

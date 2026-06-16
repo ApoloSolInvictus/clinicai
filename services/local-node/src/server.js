@@ -25,6 +25,8 @@ const config = {
   token: process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token",
   centralQueueUrl: process.env.OPENCLINIC_CENTRAL_QUEUE_URL ?? "",
   centralQueueToken: process.env.OPENCLINIC_CENTRAL_QUEUE_TOKEN ?? process.env.LOCAL_NODE_TOKEN ?? "dev-local-node-token",
+  centralQueueAccessClientId: process.env.OPENCLINIC_CENTRAL_QUEUE_ACCESS_CLIENT_ID ?? process.env.CLOUDFLARE_ACCESS_CLIENT_ID ?? "",
+  centralQueueAccessClientSecret: process.env.OPENCLINIC_CENTRAL_QUEUE_ACCESS_CLIENT_SECRET ?? process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET ?? "",
   centralQueuePollMs: Number(process.env.OPENCLINIC_QUEUE_POLL_MS ?? 0),
   centralQueuePullLimit: Number(process.env.OPENCLINIC_QUEUE_PULL_LIMIT ?? 3),
   healthRequiresToken: process.env.NODE_HEALTH_REQUIRES_TOKEN === "true" || process.env.OPENCLINIC_SECURE_HEALTH === "true"
@@ -257,6 +259,12 @@ async function callCentralQueue(payload) {
     method: "POST",
     headers: {
       authorization: `Bearer ${config.centralQueueToken}`,
+      ...(config.centralQueueAccessClientId && config.centralQueueAccessClientSecret
+        ? {
+            "CF-Access-Client-Id": config.centralQueueAccessClientId,
+            "CF-Access-Client-Secret": config.centralQueueAccessClientSecret
+          }
+        : {}),
       "content-type": "application/json"
     },
     body: JSON.stringify(payload),
@@ -351,6 +359,7 @@ app.get("/health", config.healthRequiresToken ? requireToken : (_request, _respo
       messagesPendingApproval: outboxTotals().pendingApproval,
       messagingDemoMode: localDb.messaging.demoMode,
       centralQueueConfigured: Boolean(config.centralQueueUrl),
+      centralQueueAccessConfigured: Boolean(config.centralQueueAccessClientId && config.centralQueueAccessClientSecret),
       centralQueuePollMs: config.centralQueuePollMs,
       events: localDb.events.length
     }
