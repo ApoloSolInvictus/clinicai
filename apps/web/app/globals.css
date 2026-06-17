@@ -1553,6 +1553,36 @@ h1 {
   text-align: right;
 }
 
+.outbox-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.outbox-row {
+  align-items: flex-start;
+}
+
+.outbox-copy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.outbox-target {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.outbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .result-box {
   max-height: 300px;
   overflow: auto;

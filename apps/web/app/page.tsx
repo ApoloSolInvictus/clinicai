@@ -118,6 +118,43 @@ type ExecutionState = {
 
 type PatientChannel = "email" | "whatsapp";
 
+type OutboxTotals = {
+  total: number;
+  email: number;
+  whatsapp: number;
+  pendingApproval: number;
+  approved: number;
+  rejected: number;
+};
+
+type OutboxMessage = {
+  id: string;
+  channel: PatientChannel;
+  status: string;
+  createdAt?: string;
+  approvedAt?: string;
+  patientName?: string;
+  patientId?: string;
+  appointmentId?: string;
+  reportId?: string;
+  reportTitle?: string;
+  subject?: string;
+  template?: string;
+  to?: string;
+  originalTo?: string;
+  demoTo?: string | null;
+  demoMode?: boolean;
+  providerMode?: string;
+  providerStatus?: string;
+  sent?: boolean;
+};
+
+type OutboxState = {
+  clinicId: string;
+  totals: OutboxTotals;
+  messages: OutboxMessage[];
+};
+
 type WorkFocus =
   | { module: "agenda"; kind: "appointment"; appointmentId?: string; date?: string }
   | { module: "pacientes"; kind: "patient" | "patient-report" | "patient-instruction"; patientId?: string; reportId?: string; instructionId?: string }
@@ -841,6 +878,36 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+function normalizeLocalNodeUrl(value: string) {
+  return value.trim().replace(/\/+$/, "") || "http://localhost:8787";
+}
+
+async function readJsonResponse(response: Response) {
+  const rawBody = await response.text();
+  const payload = rawBody ? JSON.parse(rawBody) : {};
+  if (!response.ok) {
+    const record = asRecord(payload);
+    throw new Error(typeof record.error === "string" ? record.error : `HTTP ${response.status}`);
+  }
+
+  return payload;
+}
+
+function outboxStatusClass(status: string) {
+  if (status === "ready_for_human_review") return "pendiente";
+  if (status.startsWith("approved")) return "aprobado";
+  if (status === "rejected_by_human") return "fallo";
+  return "pendiente";
+}
+
+function outboxStatusLabel(status: string) {
+  if (status === "ready_for_human_review") return "Pendiente";
+  if (status === "approved_for_demo_delivery") return "Aprobado demo";
+  if (status === "approved_pending_provider") return "Aprobado";
+  if (status === "rejected_by_human") return "Rechazado";
+  return status;
+}
+
 function summarizeExecution(payload: unknown, fallbackIntent?: TaskIntent): ExecutionState {
   const root = asRecord(payload);
   const task = asRecord(root.task);
@@ -894,6 +961,11 @@ export default function Home() {
   const [workFocus, setWorkFocus] = useState<WorkFocus | null>(null);
   const [state, setState] = useState<CentralState | null>(null);
   const [health, setHealth] = useState<HealthState | null>(null);
+  const [outbox, setOutbox] = useState<OutboxState | null>(null);
+  const [outboxStatus, setOutboxStatus] = useState("Bandeja local sin cargar.");
+  const [outboxBusy, setOutboxBusy] = useState(false);
+  const [localNodeUrl, setLocalNodeUrl] = useState("http://localhost:8787");
+  const [localNodeToken, setLocalNodeToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("Listo para enviar una orden al nodo local.");
   const [execution, setExecution] = useState<ExecutionState>({
@@ -935,6 +1007,13 @@ export default function Home() {
       ? "Cola central preparada"
       : "Nodo local por conectar";
 
+  useEffect(() => {
+    const savedUrl = window.localStorage.getItem("openclinic.localNodeUrl");
+    const savedToken = window.localStorage.getItem("openclinic.localNodeToken");
+    if (savedUrl) setLocalNodeUrl(savedUrl);
+    if (savedToken) setLocalNodeToken(savedToken);
+  }, []);
+
   async function loadState() {
     const response = await fetch("/api/state", {
       headers: await session.getAuthHeaders(),
@@ -966,6 +1045,72 @@ export default function Home() {
       if (shouldUpdateResult) {
         setResult(error instanceof Error ? error.message : "No se pudo consultar el nodo local.");
       }
+    }
+  }
+
+  function saveLocalNodeAccess() {
+    const normalizedUrl = normalizeLocalNodeUrl(localNodeUrl);
+    setLocalNodeUrl(normalizedUrl);
+    window.localStorage.setItem("openclinic.localNodeUrl", normalizedUrl);
+    window.localStorage.setItem("openclinic.localNodeToken", localNodeToken.trim());
+    setOutboxStatus("Acceso local guardado.");
+  }
+
+  async function refreshOutbox(options: { silent?: boolean } = {}) {
+    const token = localNodeToken.trim();
+    if (!token) {
+      setOutboxStatus("Token local requerido.");
+      return;
+    }
+
+    const nodeUrl = normalizeLocalNodeUrl(localNodeUrl);
+    setOutboxBusy(true);
+    if (!options.silent) setOutboxStatus("Consultando bandeja local.");
+    try {
+      const response = await fetch(`${nodeUrl}/outbox`, {
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store"
+      });
+      const payload = (await readJsonResponse(response)) as OutboxState;
+      setOutbox(payload);
+      setOutboxStatus(`${payload.totals.pendingApproval} mensaje(s) pendientes de aprobacion.`);
+    } catch (error) {
+      setOutboxStatus(error instanceof Error ? error.message : "No se pudo consultar la bandeja local.");
+    } finally {
+      setOutboxBusy(false);
+    }
+  }
+
+  async function reviewOutboxMessage(messageId: string, action: "approve" | "reject") {
+    const token = localNodeToken.trim();
+    if (!token) {
+      setOutboxStatus("Token local requerido.");
+      return;
+    }
+
+    const nodeUrl = normalizeLocalNodeUrl(localNodeUrl);
+    setOutboxBusy(true);
+    try {
+      const response = await fetch(`${nodeUrl}/outbox/${encodeURIComponent(messageId)}/${action}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          approvedBy: session.profile?.email ?? "web-app",
+          rejectedBy: session.profile?.email ?? "web-app"
+        }),
+        cache: "no-store"
+      });
+      const payload = await readJsonResponse(response);
+      setResult(JSON.stringify(payload, null, 2));
+      setOutboxStatus(action === "approve" ? "Mensaje aprobado." : "Mensaje rechazado.");
+      await refreshOutbox({ silent: true });
+    } catch (error) {
+      setOutboxStatus(error instanceof Error ? error.message : "No se pudo actualizar el mensaje.");
+    } finally {
+      setOutboxBusy(false);
     }
   }
 
@@ -1867,7 +2012,21 @@ export default function Home() {
               />
             ) : null}
             {activeModule === "automatizaciones" ? (
-              <AutomationsModule automations={clinicAutomations} onRunAutomation={runAutomation} busy={busy} />
+              <AutomationsModule
+                automations={clinicAutomations}
+                outbox={outbox}
+                outboxBusy={outboxBusy}
+                outboxStatus={outboxStatus}
+                localNodeUrl={localNodeUrl}
+                localNodeToken={localNodeToken}
+                onLocalNodeUrlChange={setLocalNodeUrl}
+                onLocalNodeTokenChange={setLocalNodeToken}
+                onSaveLocalNodeAccess={saveLocalNodeAccess}
+                onRefreshOutbox={refreshOutbox}
+                onReviewOutboxMessage={reviewOutboxMessage}
+                onRunAutomation={runAutomation}
+                busy={busy}
+              />
             ) : null}
             {activeModule === "configuracion" ? (
               <SettingsModule state={state} profileRole={session.profile?.role ?? "clinic-user"} clinicId={clinicId} />
@@ -1883,6 +2042,18 @@ export default function Home() {
                 busy={busy}
                 onChange={setForm}
                 onSubmit={submitTask}
+              />
+              <MessageApprovalPanel
+                outbox={outbox}
+                busy={outboxBusy}
+                status={outboxStatus}
+                localNodeUrl={localNodeUrl}
+                localNodeToken={localNodeToken}
+                onLocalNodeUrlChange={setLocalNodeUrl}
+                onLocalNodeTokenChange={setLocalNodeToken}
+                onSaveLocalNodeAccess={saveLocalNodeAccess}
+                onRefresh={refreshOutbox}
+                onReview={reviewOutboxMessage}
               />
             </aside>
           ) : null}
@@ -5463,33 +5634,196 @@ function ReportsModule({
 
 function AutomationsModule({
   automations,
+  outbox,
+  outboxBusy,
+  outboxStatus,
+  localNodeUrl,
+  localNodeToken,
+  onLocalNodeUrlChange,
+  onLocalNodeTokenChange,
+  onSaveLocalNodeAccess,
+  onRefreshOutbox,
+  onReviewOutboxMessage,
   onRunAutomation,
   busy
 }: {
   automations: AutomationTemplate[];
+  outbox: OutboxState | null;
+  outboxBusy: boolean;
+  outboxStatus: string;
+  localNodeUrl: string;
+  localNodeToken: string;
+  onLocalNodeUrlChange: (value: string) => void;
+  onLocalNodeTokenChange: (value: string) => void;
+  onSaveLocalNodeAccess: () => void;
+  onRefreshOutbox: () => void;
+  onReviewOutboxMessage: (messageId: string, action: "approve" | "reject") => void;
   onRunAutomation: (template: AutomationTemplate) => void;
   busy: boolean;
 }) {
   return (
-    <Panel icon={Bot} title="Automatizaciones OpenClaw">
-      <div className="surface-list">
-        {automations.map((template) => (
-          <div className="surface-row automation-row" key={template.id}>
-            <div>
-              <strong>{template.name}</strong>
-              <p>{template.prompt}</p>
-              <div className="tag-row">
-                <span className="tag">{intentLabels[template.intent]}</span>
-                <span className="tag">{template.role}</span>
-                <span className={`status-chip priority-${template.priority}`}>{template.priority}</span>
+    <div className="grid">
+      <MessageApprovalPanel
+        outbox={outbox}
+        busy={outboxBusy}
+        status={outboxStatus}
+        localNodeUrl={localNodeUrl}
+        localNodeToken={localNodeToken}
+        onLocalNodeUrlChange={onLocalNodeUrlChange}
+        onLocalNodeTokenChange={onLocalNodeTokenChange}
+        onSaveLocalNodeAccess={onSaveLocalNodeAccess}
+        onRefresh={onRefreshOutbox}
+        onReview={onReviewOutboxMessage}
+      />
+
+      <Panel icon={Bot} title="Automatizaciones OpenClaw">
+        <div className="surface-list">
+          {automations.map((template) => (
+            <div className="surface-row automation-row" key={template.id}>
+              <div>
+                <strong>{template.name}</strong>
+                <p>{template.prompt}</p>
+                <div className="tag-row">
+                  <span className="tag">{intentLabels[template.intent]}</span>
+                  <span className="tag">{template.role}</span>
+                  <span className={`status-chip priority-${template.priority}`}>{template.priority}</span>
+                </div>
               </div>
+              <button className="btn primary" onClick={() => onRunAutomation(template)} disabled={busy}>
+                <Play size={18} />
+                {busy ? "Ejecutando" : "Ejecutar"}
+              </button>
             </div>
-            <button className="btn primary" onClick={() => onRunAutomation(template)} disabled={busy}>
-              <Play size={18} />
-              {busy ? "Ejecutando" : "Ejecutar"}
-            </button>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function MessageApprovalPanel({
+  outbox,
+  busy,
+  status,
+  localNodeUrl,
+  localNodeToken,
+  onLocalNodeUrlChange,
+  onLocalNodeTokenChange,
+  onSaveLocalNodeAccess,
+  onRefresh,
+  onReview
+}: {
+  outbox: OutboxState | null;
+  busy: boolean;
+  status: string;
+  localNodeUrl: string;
+  localNodeToken: string;
+  onLocalNodeUrlChange: (value: string) => void;
+  onLocalNodeTokenChange: (value: string) => void;
+  onSaveLocalNodeAccess: () => void;
+  onRefresh: () => void;
+  onReview: (messageId: string, action: "approve" | "reject") => void;
+}) {
+  const messages = outbox?.messages ?? [];
+  const pending = outbox?.totals.pendingApproval ?? 0;
+  const approved = outbox?.totals.approved ?? 0;
+  const rejected = outbox?.totals.rejected ?? 0;
+
+  return (
+    <Panel icon={MessageCircle} title="Mensajes por aprobar">
+      <div className="outbox-panel">
+        <div className="field-grid">
+          <div className="field">
+            <label htmlFor="local-node-url">Nodo local</label>
+            <input
+              id="local-node-url"
+              value={localNodeUrl}
+              onChange={(event) => onLocalNodeUrlChange(event.target.value)}
+              placeholder="http://localhost:8787"
+            />
           </div>
-        ))}
+          <div className="field">
+            <label htmlFor="local-node-token">Token local</label>
+            <input
+              id="local-node-token"
+              type="password"
+              value={localNodeToken}
+              onChange={(event) => onLocalNodeTokenChange(event.target.value)}
+              placeholder="LOCAL_NODE_TOKEN"
+            />
+          </div>
+        </div>
+
+        <div className="button-row">
+          <button className="btn" type="button" onClick={onSaveLocalNodeAccess} disabled={busy}>
+            <Save size={18} />
+            Guardar
+          </button>
+          <button className="btn primary" type="button" onClick={onRefresh} disabled={busy}>
+            <RefreshCw size={18} />
+            {busy ? "Actualizando" : "Actualizar"}
+          </button>
+        </div>
+
+        <div className="tag-row">
+          <span className="status-chip pendiente">{pending} pendientes</span>
+          <span className="status-chip aprobado">{approved} aprobados</span>
+          <span className="status-chip fallo">{rejected} rechazados</span>
+          <span className="tag">{status}</span>
+        </div>
+
+        <div className="surface-list">
+          {messages.length === 0 ? (
+            <div className="surface-block">
+              <strong>Sin mensajes cargados</strong>
+              <p>{status}</p>
+            </div>
+          ) : null}
+
+          {messages.map((message) => {
+            const isPending = message.status === "ready_for_human_review";
+            const title = message.patientName ?? message.reportTitle ?? message.subject ?? message.template ?? message.id;
+            const destination = message.demoMode && message.demoTo ? message.demoTo : message.to;
+            const originalDestination = message.originalTo && message.originalTo !== destination ? message.originalTo : null;
+
+            return (
+              <div className="surface-row outbox-row" key={message.id}>
+                <div className="outbox-copy">
+                  <strong>{title}</strong>
+                  <p>
+                    {message.channel.toUpperCase()} - {message.subject ?? message.template ?? "Mensaje clinico"}
+                  </p>
+                  <div className="tag-row">
+                    <span className={`status-chip ${outboxStatusClass(message.status)}`}>
+                      {outboxStatusLabel(message.status)}
+                    </span>
+                    {message.demoMode ? <span className="tag">demo</span> : null}
+                    {message.reportTitle ? <span className="tag">{message.reportTitle}</span> : null}
+                  </div>
+                  <div className="outbox-target">
+                    <span>{destination ?? "Destino pendiente"}</span>
+                    {originalDestination ? <span>Original: {originalDestination}</span> : null}
+                  </div>
+                </div>
+                <div className="outbox-actions">
+                  <button
+                    className="btn primary"
+                    type="button"
+                    onClick={() => onReview(message.id, "approve")}
+                    disabled={busy || !isPending}
+                  >
+                    <CheckCircle2 size={18} />
+                    Aprobar
+                  </button>
+                  <button className="btn danger" type="button" onClick={() => onReview(message.id, "reject")} disabled={busy || !isPending}>
+                    <Trash2 size={18} />
+                    Rechazar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </Panel>
   );
