@@ -1554,7 +1554,7 @@ export default function Home() {
       {
         icon: Bot,
         label: "Nodo OpenClaw",
-        value: health?.ok ? "Online" : "Pendiente",
+        value: localNodeOnline ? "Online" : centralQueueReady ? "Cola activa" : "Pendiente",
         className: "icon-indigo",
         focus: { module: "automatizaciones", kind: "automation" } satisfies WorkFocus
       },
@@ -1587,7 +1587,7 @@ export default function Home() {
         focus: { module: "automatizaciones", kind: "automation" } satisfies WorkFocus
       }
     ];
-  }, [clinicCash, clinicPatients, clinicStaff, health?.ok, state?.tasks]);
+  }, [centralQueueReady, clinicCash, clinicPatients, clinicStaff, localNodeOnline, state?.tasks]);
 
   if (session.loading) {
     return (
