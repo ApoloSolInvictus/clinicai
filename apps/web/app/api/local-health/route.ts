@@ -53,6 +53,7 @@ export async function GET(request: Request) {
   try {
     const accessClientId = node.accessClientId?.trim() ?? "";
     const accessClientSecret = node.accessClientSecret?.trim() ?? "";
+    const expectedAccessAudience = node.accessAudience?.trim() ?? "";
     const accessConfigured = Boolean(accessClientId && accessClientSecret);
     const centralQueueMode = shouldUseCentralQueueMode();
     const response = await fetch(`${node.nodeUrl.replace(/\/$/, "")}/health`, {
@@ -73,6 +74,10 @@ export async function GET(request: Request) {
 
     if (!response.ok) {
       const accessBlocked = response.status === 401 || response.status === 403;
+      const actualAccessAudience = response.headers.get("cf-access-aud");
+      const accessAudienceMatches = expectedAccessAudience
+        ? actualAccessAudience === expectedAccessAudience
+        : null;
       return NextResponse.json({
         ...(payload ?? {}),
         ok: false,
@@ -87,7 +92,9 @@ export async function GET(request: Request) {
         upstreamContentType: contentType || null,
         cloudflareAccessConfigured: accessConfigured,
         cloudflareClientIdLooksValid: accessClientId.endsWith(".access"),
-        cloudflareAccessAudience: response.headers.get("cf-access-aud"),
+        cloudflareAccessAudience: actualAccessAudience,
+        cloudflareAccessAudienceExpected: expectedAccessAudience || null,
+        cloudflareAccessAudienceMatches: accessAudienceMatches,
         error: accessBlocked
           ? `Cloudflare Access rechazo la solicitud con HTTP ${response.status}.`
           : `El nodo respondio HTTP ${response.status}.`,
@@ -95,7 +102,9 @@ export async function GET(request: Request) {
           ? "El ping directo al nodo fue bloqueado, pero OpenClaw esta configurado para trabajar por cola central pull."
           : undefined,
         hint: accessBlocked
-          ? accessConfigured
+          ? accessAudienceMatches === false
+            ? "Cloudflare esta devolviendo un AUD distinto al esperado. Revisa que el hostname del nodo este protegido por la aplicacion Access correcta y que no exista otra app wildcard/exacta capturando el subdominio."
+            : accessConfigured
             ? "Vercel tiene credenciales configuradas, pero Cloudflare no acepta este Service Token. Revisa que la aplicacion Access incluya este token exacto en una politica con accion Service Auth."
             : "Vercel no tiene disponibles ambas credenciales de Cloudflare Access en este deployment."
           : getLocalNodeUrlHint(node.nodeUrl)
@@ -108,7 +117,8 @@ export async function GET(request: Request) {
       nodeUrl: node.nodeUrl,
       reachable: response.ok,
       cloudflareAccessConfigured: accessConfigured,
-      cloudflareClientIdLooksValid: accessClientId.endsWith(".access")
+      cloudflareClientIdLooksValid: accessClientId.endsWith(".access"),
+      cloudflareAccessAudienceExpected: expectedAccessAudience || null
     });
   } catch (error) {
     const centralQueueMode = shouldUseCentralQueueMode();

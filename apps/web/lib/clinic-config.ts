@@ -8,6 +8,7 @@ export type ClinicNodeConfig = {
   token?: string;
   accessClientId?: string;
   accessClientSecret?: string;
+  accessAudience?: string;
 };
 
 type RawClinicNodeConfig = Partial<Omit<ClinicNodeConfig, "id">> & {
@@ -162,7 +163,8 @@ function normalizeClinicConfig(id: string, value: RawClinicNodeConfig): ClinicNo
     nodeUrl,
     token: value.token ?? process.env.LOCAL_NODE_TOKEN,
     accessClientId: value.accessClientId ?? process.env.CLOUDFLARE_ACCESS_CLIENT_ID,
-    accessClientSecret: value.accessClientSecret ?? process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET
+    accessClientSecret: value.accessClientSecret ?? process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET,
+    accessAudience: value.accessAudience ?? process.env.CLOUDFLARE_ACCESS_AUDIENCE
   };
 }
 
@@ -197,7 +199,8 @@ function getTemplateClinicConfig(clinicId: string): ClinicNodeConfig | null {
     nodeUrl,
     token: process.env.LOCAL_NODE_TOKEN,
     accessClientId: process.env.CLOUDFLARE_ACCESS_CLIENT_ID,
-    accessClientSecret: process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET
+    accessClientSecret: process.env.CLOUDFLARE_ACCESS_CLIENT_SECRET,
+    accessAudience: process.env.CLOUDFLARE_ACCESS_AUDIENCE
   };
 }
 
